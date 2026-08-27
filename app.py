@@ -41,7 +41,7 @@ df = st.session_state.get("base_df")
 if df is not None:
     st.subheader("Prévia da base")
     st.write(f"{len(df):,} linhas × {df.shape[1]} colunas".replace(",", "."))
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(20), use_container_width=720)
     try:
         cfg = config.validar(yaml.safe_load(lay_txt))
         dfv = ingest.validar(df, cfg)

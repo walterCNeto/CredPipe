@@ -6,6 +6,13 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+ESCALA = 0.80   # tamanho relativo das figuras
+plt.rcParams.update({"figure.dpi": 100, "font.size": 8, "axes.titlesize": 9, "axes.labelsize": 8,
+                     "legend.fontsize": 7, "xtick.labelsize": 7, "ytick.labelsize": 7})
+_subplots = plt.subplots
+def _sub(*a, figsize=(6.4, 4.8), **k):
+    return _subplots(*a, figsize=(figsize[0] * ESCALA, figsize[1] * ESCALA), **k)
+plt.subplots = _sub
 from sklearn.metrics import roc_curve
 from .grades import matriz_gh_tempo, tab_gh
 from .metrics import janela_de
@@ -13,7 +20,7 @@ from .metrics import janela_de
 
 def _save(fig, out: Path, nome: str) -> str:
     out.mkdir(parents=True, exist_ok=True)
-    p = out / f"{nome}.png"; fig.tight_layout(); fig.savefig(p, dpi=120); plt.close(fig)
+    p = out / f"{nome}.png"; fig.tight_layout(); fig.savefig(p, dpi=220); plt.close(fig)
     return p.name
 
 

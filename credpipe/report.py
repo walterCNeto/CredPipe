@@ -15,7 +15,7 @@ CSS = """
 body{font-family:Georgia,'Times New Roman',serif;max-width:980px;margin:2rem auto;padding:0 1.5rem;line-height:1.5;color:#222}
 h1{font-size:1.9rem;border-bottom:2px solid #333;padding-bottom:.3rem}h2{margin-top:2.2rem;border-bottom:1px solid #999}h3{margin-top:1.5rem}
 table{border-collapse:collapse;font-size:.85rem;margin:1rem 0;font-family:Arial,Helvetica,sans-serif}th,td{border:1px solid #bbb;padding:3px 8px;text-align:right}
-th{background:#f0f0f0}td:first-child,th:first-child{text-align:left}img{max-width:100%;margin:.5rem 0}
+th{background:#f0f0f0}td:first-child,th:first-child{text-align:left}img{max-width:78%;display:block;margin:.6rem auto}
 .meta{color:#555;font-size:.9rem}.resumo{background:#f7f7f7;padding:1rem;border-left:4px solid #666}code{font-family:Consolas,monospace;font-size:.9em}
 .ref{font-size:.9rem}
 """
