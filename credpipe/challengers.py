@@ -50,7 +50,7 @@ def _sklearn(dev_train, oos, oot, cfg, k):
 def _pycaret(exp, dev_train, oos, oot, cfg, k):
     num, cat = C.numericas(cfg), C.categoricas(cfg)
     tgt = cfg["target"]
-    exp.compare_models(sort="AUC", n_select=len(exp.models()), exclude=["lr", "dummy"], verbose=False)
+    exp.compare_models(sort="AUC", n_select=len(exp.models()), exclude=["lr", "dummy", "ridge", "svm"], verbose=False)
     comp_full = exp.pull().reset_index().rename(columns={"index": "id", "Model": "modelo", "AUC": "AUC_cv"})
     comp = comp_full[["modelo", "AUC_cv", "id"]].head(k)
     resultados, importancias, preds = [], {}, {}
@@ -60,8 +60,10 @@ def _pycaret(exp, dev_train, oos, oot, cfg, k):
             m = exp.tune_model(m, optimize="AUC", n_iter=cfg["desafiantes"]["tune_iter"], verbose=False)
         except Exception:
             pass
-        p = {a: exp.predict_model(m, data=d[num + cat], raw_score=True, verbose=False)["prediction_score_1"].values
-             for a, d in (("oos", oos), ("oot", oot))}
+        outs = {a: exp.predict_model(m, data=d[num + cat], raw_score=True, verbose=False) for a, d in (("oos", oos), ("oot", oot))}
+        if any("prediction_score_1" not in o.columns for o in outs.values()):
+            continue                                   # modelo sem predict_proba
+        p = {a: o["prediction_score_1"].values for a, o in outs.items()}
         preds[r["modelo"]] = p
         resultados.append({"modelo": r["modelo"], **{f"{mm}_OOS": v for mm, v in metr(oos[tgt], p["oos"]).items()},
                            **{f"{mm}_OOT": v for mm, v in metr(oot[tgt], p["oot"]).items()}})
