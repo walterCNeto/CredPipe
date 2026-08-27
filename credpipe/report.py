@@ -32,18 +32,50 @@ def tab(df: pd.DataFrame, index: bool = False, max_rows: int = 200) -> str:
     return "\n".join(linhas)
 
 
+_ACENTOS = {"'": {"a": "á", "e": "é", "i": "í", "o": "ó", "u": "ú", "A": "Á", "E": "É", "I": "Í", "O": "Ó", "U": "Ú"},
+            "~": {"a": "ã", "o": "õ", "n": "ñ", "A": "Ã", "O": "Õ"}, '"': {"a": "ä", "e": "ë", "o": "ö", "u": "ü", "O": "Ö", "U": "Ü"},
+            "^": {"a": "â", "e": "ê", "o": "ô"}, "`": {"a": "à", "e": "è"}, "c": {"c": "ç", "C": "Ç"}}
+
+
+def _delatex(s: str) -> str:
+    s = re.sub(r"\\url\{([^}]*)\}", r"\1", s)
+    s = re.sub(r"\\textsuperscript\{([^}]*)\}", lambda m: {"o": "º", "a": "ª"}.get(m.group(1), m.group(1)), s)
+    def acc(m):
+        return _ACENTOS.get(m.group(1), {}).get(m.group(2), m.group(2))
+    s = re.sub(r"\{?\\(['~\"^`c])\s*\\?([A-Za-z])\}?", acc, s)      # {\'a} \'a {\c c} \~{a}
+    s = re.sub(r"\{?\\(['~\"^`c])\{([A-Za-z])\}\}?", acc, s)
+    s = re.sub(r"\\(['~\"^`c])\\i\b", lambda m: _ACENTOS[m.group(1)].get("i", "i"), s)
+    return s
+
+
 def referencias(bib_path: Path) -> list:
-    txt = bib_path.read_text(encoding="utf-8")
+    """Parser simples de BibTeX: robusto a CRLF, chaves aninhadas e ordem dos campos."""
+    txt = bib_path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     refs = []
-    for m in re.finditer(r"@(\w+)\{(\w+),(.*?)\n\}", txt, flags=re.S):
-        campos = dict(re.findall(r"(\w+)\s*=\s*\{(.*?)\}(?=,\s*\w+\s*=|\s*$)", m.group(3), flags=re.S))
-        autor = campos.get("author") or campos.get("editor", "")
-        autor = re.sub(r"\s+", " ", autor.replace("{", "").replace("}", "")).replace(" and ", "; ")
-        titulo = re.sub(r"\s+", " ", campos.get("title", "").replace("{", "").replace("}", ""))
-        onde = campos.get("journal") or campos.get("booktitle") or campos.get("publisher") or campos.get("institution") or campos.get("school") or ""
-        vol = campos.get("volume", ""); num = campos.get("number", ""); pg = campos.get("pages", "")
-        extra = f" {vol}" + (f"({num})" if num else "") + (f": {pg}" if pg else "") if vol else ""
-        refs.append(f"{autor} ({campos.get('year','')}). {titulo}. {onde}{extra}.".replace("..", ".").replace("\\", ""))
+    for bloco in re.split(r"\n(?=@)", "\n" + txt):
+        m = re.match(r"@\w+\{[^,]+,(.*)\}\s*$", bloco.strip(), flags=re.S)
+        if not m:
+            continue
+        corpo, campos, i = m.group(1), {}, 0
+        while True:
+            mm = re.compile(r"\s*(\w+)\s*=\s*\{").match(corpo, i)
+            if not mm:
+                break
+            nome, j, prof = mm.group(1).lower(), mm.end(), 1
+            k = j
+            while k < len(corpo) and prof:
+                prof += {"{": 1, "}": -1}.get(corpo[k], 0); k += 1
+            campos[nome] = corpo[j:k - 1]
+            i = k
+            while i < len(corpo) and corpo[i] in ", \n\t":
+                i += 1
+        limpa = lambda s: re.sub(r"\s+", " ", _delatex(s).replace("{", "").replace("}", "").replace("\\", "")).strip()
+        autor = limpa(campos.get("author") or campos.get("editor", "")).replace(" and ", "; ")
+        titulo = limpa(campos.get("title", ""))
+        onde = limpa(campos.get("journal") or campos.get("booktitle") or campos.get("publisher") or campos.get("institution") or campos.get("school") or "")
+        vol, num, pg = campos.get("volume", ""), campos.get("number", ""), campos.get("pages", "")
+        extra = (f" {vol}" + (f"({num})" if num else "") + (f": {pg}" if pg else "")) if vol else ""
+        refs.append(f"{autor} ({campos.get('year', '')}). {titulo}. {onde}{extra}.".replace("..", "."))
     return sorted(refs)
 
 
