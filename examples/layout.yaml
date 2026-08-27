@@ -1,0 +1,43 @@
+# Layout da base de modelagem — único arquivo que muda de uma base para outra
+id: id
+safra: safra            # YYYYMM
+target: default         # 0/1, já marcado e maturado
+seed: 42
+
+oot:
+  n_safras: 6           # alternativa: a_partir_de: 202407
+oos_frac: 0.20
+maturacao:
+  safra_max_valida: null   # ex.: 202412 — safras posteriores são descartadas no ingest
+
+variaveis:
+  idade:          {tipo: num, sinal_esperado: "-", descricao: "Ciclo de vida: jovens têm renda corrente abaixo da permanente"}
+  renda:          {tipo: num, sinal_esperado: "-", descricao: "Capacidade de pagamento absoluta"}
+  tempo_emprego:  {tipo: num, sinal_esperado: "-", descricao: "Estabilidade de renda"}
+  utilizacao:     {tipo: num, sinal_esperado: "+", descricao: "Restrição de liquidez (Gross & Souleles, 2002)"}
+  n_atrasos_12m:  {tipo: num, sinal_esperado: "+", bins: [-inf, 0, 1, inf], descricao: "Persistência de comportamento"}
+  dti:            {tipo: num, sinal_esperado: "+", descricao: "Comprometimento de renda"}
+  consultas_6m:   {tipo: num, sinal_esperado: "+", bins: [-inf, 0, 2, inf], descricao: "Busca por crédito / seleção adversa"}
+  possui_imovel:  {tipo: num, sinal_esperado: "-", bins: [-inf, 0, inf], descricao: "Riqueza e colateral"}
+  tipo_ocupacao:  {tipo: cat, descricao: "Estabilidade da fonte de renda"}
+ignorar: []
+
+lr:        {train_size: 0.70, fold: 5, tune_iter: 20, backend: auto}   # auto = pycaret se instalado, senão sklearn
+escala:    {modo: faixa_cheia, pdo: 40, score0: 600, odds0: 20, lo: 100, hi: 900}
+binagem:   {n_quantis: 5, nivel_raro_cat: 0.02}
+restricoes:
+  iv_min: 0.02
+  n_min_faixa: 0.05
+  monotonico: true
+  rho_min: 0.80
+  csi_max: 0.10
+  beta_tol: 0.0
+  janela: S
+  max_iter: 40
+gh:        {k_inicial: 10, min_gh: 4, min_def_gh: 20, janela: B, min_n_celula: 30, max_frac_cruz: 0.0, alpha_cruz: 0.10, testar_dev: true}
+# alpha_cruz: só conta cruzamento significativo (z unilateral); null = qualquer inversão conta (estrito, colapsa a malha com amostras pequenas)
+calibracao: {moc: IC95_sup}      # IC95_sup | null | fator numérico (ex. 1.10)
+desafiantes: {ativo: true, top_k: 3, tune_iter: 20}
+custo_fn_fp: [10, 1]
+formato:   {casas: 3, sep_decimal: ","}
+relatorio: {titulo: "Modelo de PD — Scorecard", autor: "Superintendência de Validação de Modelos", pdf: auto}

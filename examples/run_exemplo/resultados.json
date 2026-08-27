@@ -1,0 +1,115 @@
+{
+  "n_base": 10000,
+  "taxa_default_base": 0.216,
+  "n_dev_train": 5991,
+  "n_oos": 1498,
+  "n_oot": 2511,
+  "safras_oot": [
+    202407,
+    202408,
+    202409,
+    202410,
+    202411,
+    202412
+  ],
+  "backend_lr": "sklearn",
+  "tuning": {
+    "C": 1.0,
+    "auc_cv": 0.73,
+    "manteve_original": true
+  },
+  "escala": {
+    "factor": 169.749,
+    "offset": 262.691,
+    "pdo": 117.661,
+    "lo": 100,
+    "hi": 900
+  },
+  "n_variaveis": 9,
+  "variaveis": [
+    "idade",
+    "renda",
+    "tempo_emprego",
+    "utilizacao",
+    "n_atrasos_12m",
+    "dti",
+    "consultas_6m",
+    "possui_imovel",
+    "tipo_ocupacao"
+  ],
+  "n_faixas": 32,
+  "n_faixas_inicial": 37,
+  "status_refino": "convergiu na iteração 3",
+  "k_gh": 8,
+  "cortes_gh": [
+    318.0,
+    393.0,
+    442.0,
+    566.0,
+    608.0,
+    657.0,
+    722.0
+  ],
+  "status_gh": "convergiu",
+  "hhi": 0.155,
+  "csi_max": 0.005,
+  "ordem_gh_ok": {
+    "dev": true,
+    "OOT": true
+  },
+  "metricas_lr": {
+    "dev_train": {
+      "AUC": 0.734,
+      "Gini": 0.467,
+      "KS": 0.347
+    },
+    "oos": {
+      "AUC": 0.714,
+      "Gini": 0.428,
+      "KS": 0.328
+    },
+    "oot": {
+      "AUC": 0.715,
+      "Gini": 0.43,
+      "KS": 0.326
+    }
+  },
+  "metricas_scorecard": {
+    "dev_train": {
+      "AUC": 0.733,
+      "Gini": 0.465,
+      "KS": 0.344
+    },
+    "oos": {
+      "AUC": 0.707,
+      "Gini": 0.414,
+      "KS": 0.331
+    },
+    "oot": {
+      "AUC": 0.705,
+      "Gini": 0.41,
+      "KS": 0.303
+    }
+  },
+  "metricas_scorecard_inicial": {
+    "oos": {
+      "AUC": 0.709,
+      "Gini": 0.418,
+      "KS": 0.334
+    },
+    "oot": {
+      "AUC": 0.706,
+      "Gini": 0.412,
+      "KS": 0.307
+    }
+  },
+  "cortes": {
+    "corte_custo": 0.06,
+    "custo_min": 1100.0,
+    "pct_aprovacao_custo": 0.098,
+    "corte_f1": 0.19,
+    "f1_max": 0.452,
+    "pct_aprovacao_f1": 0.543
+  },
+  "tempo_s": 28.9
+}

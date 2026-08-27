@@ -1,0 +1,189 @@
+# {{ cfg.relatorio.titulo }}
+
+<p class="meta">{{ cfg.relatorio.autor }} — {{ hoje }} — gerado por credpipe (backend LR: {{ r.backend_lr }})</p>
+
+<div class="resumo">
+<strong>Resumo.</strong> Modelo de probabilidade de <em>default</em> (PD) construído por regressão logística e convertido em <em>scorecard</em> com variáveis categorizadas por <em>Weight of Evidence</em>. Base de {{ r.n_base|i0 }} operações (taxa de default {{ r.taxa_default_base|p3 }}), dividida em desenvolvimento ({{ r.n_dev_train|i0 }}), <em>out-of-sample</em> ({{ r.n_oos|i0 }}) e <em>out-of-time</em> ({{ r.n_oot|i0 }}; safras {{ r.safras_oot[0] }}–{{ r.safras_oot[-1] }}). O refino recursivo de faixas convergiu ({{ r.status_refino }}) com {{ r.n_variaveis }} variáveis e {{ r.n_faixas }} faixas; a malha de {{ r.k_gh }} grupos homogêneos é monotônica, sem cruzamento significativo entre janelas ({{ r.status_gh }}) e calibrada na taxa observada do OOT. Discriminação do scorecard: AUC {{ r.metricas_scorecard.oos.AUC|f3 }} (OOS) e {{ r.metricas_scorecard.oot.AUC|f3 }} (OOT); Gini {{ r.metricas_scorecard.oot.Gini|f3 }}; KS {{ r.metricas_scorecard.oot.KS|f3 }} no OOT. Regressão logística contínua: AUC {{ r.metricas_lr.oos.AUC|f3 }} (OOS) e {{ r.metricas_lr.oot.AUC|f3 }} (OOT).
+</div>
+
+[TOC]
+
+## 1. Objetivo e escopo
+
+O modelo estima $\Pr(Y=1\mid \mathbf{x})$, em que $Y$ indica o evento de <em>default</em> marcado na coluna `{{ cfg.target }}` da base e $\mathbf{x}$ reúne as variáveis declaradas no layout. A safra (`{{ cfg.safra }}`) não é preditor: organiza a divisão temporal e as janelas em que estabilidade é medida. A PD alimenta a perda esperada $EL = PD \times LGD \times EAD$ usada em provisão (IFRS 9 / Resolução CMN 4.966) e em capital (Basileia IRB / Circular BCB 3.648), e por isso o desenvolvimento verifica discriminação, calibração e estabilidade, as três propriedades que a validação independente testa (BCBS, 2005; SR 11-7).
+
+## 2. Base de dados
+
+| item | valor |
+|---|---|
+| observações | {{ r.n_base|i0 }} |
+| taxa de default | {{ r.taxa_default_base|p3 }} |
+| safras | {{ res.sumario.safras[0] }} a {{ res.sumario.safras[-1] }} ({{ res.sumario.safras|length }} safras) |
+| desenvolvimento (treino) | {{ r.n_dev_train|i0 }} |
+| OOS (in-time, {{ (cfg.oos_frac*100)|round|int }}% do dev) | {{ r.n_oos|i0 }} |
+| OOT | {{ r.n_oot|i0 }} — safras {{ r.safras_oot|join(', ') }} |
+
+### 2.1 Variáveis e racionalidade econômica
+
+| variável | tipo | sinal esperado | racionalidade |
+|---|---|---|---|
+{% for v, d in desc_vars.items() %}| {{ v }} | {{ cfg.variaveis[v].tipo }} | {{ sinais[v] or '—' }} | {{ d or '—' }} |
+{% endfor %}
+
+Taxa de default por safra (toda a base):
+
+{{ tab(res.sumario.por_safra) }}
+
+## 3. Metodologia
+
+**Regressão logística.** O <em>log-odds</em> é linear nas covariáveis, $\ln\frac{PD}{1-PD}=\beta_0+\boldsymbol\beta^\top\mathbf{x}$, estimado por máxima verossimilhança com penalidade L2 (ridge) e covariáveis padronizadas; $e^{\beta_j}$ é o <em>odds ratio</em> por desvio-padrão (Hosmer, Lemeshow e Sturdivant, 2013). O hiperparâmetro $C$ foi buscado em {{ cfg.lr.tune_iter }} configurações otimizando AUC em validação cruzada estratificada de {{ cfg.lr.fold }} dobras; o modelo original é mantido quando o ajuste não melhora.
+
+**Discriminação e calibração.** AUC (Hanley e McNeil, 1982), Gini $=2\,AUC-1$ (Engelmann, Hayden e Tasche, 2003), KS $=\max_c|TPR(c)-FPR(c)|$, tabela de decis e curva de calibração. Corte de aprovação por F1 e por custo (FN:FP = {{ cfg.custo_fn_fp[0] }}:{{ cfg.custo_fn_fp[1] }}).
+
+**Escala de pontos.** $Score = Offset + Factor\cdot\ln(odds_{bom})$, $Factor = PDO/\ln 2$ (Siddiqi, 2017; Anderson, 2007). Modo `{{ cfg.escala.modo }}`: Factor = {{ r.escala.factor|f3 }}, Offset = {{ r.escala.offset|f3 }}, PDO implícito = {{ r.escala.pdo|f3 }}, limites {{ cfg.escala.lo }}–{{ cfg.escala.hi }}.
+
+**WoE, IV e scorecard.** $WoE_j=\ln\frac{n_j^B/N^B}{n_j^M/N^M}$ (positivo = faixa mais segura), $IV=\sum_j(n_j^B/N^B-n_j^M/N^M)\,WoE_j$ (Good, 1950; Kullback e Leibler, 1951). Regressão logística sem regularização sobre as variáveis em WoE; pontos por faixa $=-Factor\cdot\beta_k\cdot WoE_{kj}+(Offset-Factor\cdot\beta_0)/K$. Sob independência condicional os $\beta_k$ seriam todos $-1$; coeficientes positivos contradizem a evidência univariada.
+
+**Refino recursivo (Algoritmo H).** A cada iteração, para cada variável, aplica-se a correção menos destrutiva que resolve a primeira restrição violada, na ordem: IV $\ge$ {{ cfg.restricoes.iv_min }} → população mínima por faixa {{ (cfg.restricoes.n_min_faixa*100)|round|int }}% → monotonicidade do WoE (numéricas) → ausência de inversão de sinal do WoE entre dev e OOT → Spearman(WoE dev, WoE OOT) $\ge$ {{ cfg.restricoes.rho_min }} → CSI $\le$ {{ cfg.restricoes.csi_max }}. Só quando nenhuma faixa exige ação testam-se os coeficientes (dev e janelas `{{ cfg.restricoes.janela }}`): beta $>$ {{ cfg.restricoes.beta_tol }} ou tendência contrária ao `sinal_esperado` descarta a variável (uma por iteração, por multicolinearidade).
+
+**Estabilidade temporal.** PSI do score por safra (Yurdakul, 2018), CSI por variável, correlação de ordenação do WoE e betas reestimados por janela; OOS mede sobreajuste, OOT mede sobrevivência das relações no tempo (Breeden, 2016; BCBS, 2005).
+
+**Malha de GH e calibração.** Grupos homogêneos por quantis do score ({{ cfg.gh.k_inicial }} iniciais), fundidos recursivamente até: taxa monotônica no dev, $\ge$ {{ cfg.gh.min_def_gh }} defaults por GH e nenhum cruzamento{% if cfg.gh.alpha_cruz %} significativo (z unilateral, $\alpha$ = {{ cfg.gh.alpha_cruz }}){% endif %} entre GHs adjacentes em qualquer janela `{{ cfg.gh.janela }}` com $\ge$ {{ cfg.gh.min_n_celula }} observações{% if cfg.gh.testar_dev %} (OOT e dev){% else %} (OOT){% endif %}. A PD de cada GH é a taxa observada no OOT, com intervalo de Jeffreys a 95% e teste binomial contra a PD implícita pela escala; margem de conservadorismo `{{ cfg.calibracao.moc }}`.
+
+## 4. Regressão logística
+
+### 4.1 Validação cruzada
+
+{{ tab(res.lr.cv, index=True) }}
+
+Tuning: C = {{ r.tuning.C|f3 }}, AUC CV = {{ r.tuning.auc_cv|f3 }}{% if r.tuning.manteve_original %} (modelo original mantido){% endif %}.
+
+### 4.2 Coeficientes e odds ratios (intercepto {{ res.lr.intercepto|f3 }})
+
+{{ tab(res.lr.coefs) }}
+
+### 4.3 Desempenho por amostra
+
+| amostra | AUC | Gini | KS |
+|---|---|---|---|
+{% for k, m in r.metricas_lr.items() %}| {{ k }} | {{ m.AUC|f3 }} | {{ m.Gini|f3 }} | {{ m.KS|f3 }} |
+{% endfor %}
+
+![ROC](figs/{{ figs.roc }})
+![Calibração](figs/{{ figs.calibracao }})
+
+### 4.4 Tabela de decis (OOT)
+
+{{ tab(res.lr.decis_oot) }}
+
+![Decis](figs/{{ figs.decis }})
+
+### 4.5 Corte de aprovação (OOS)
+
+| critério | corte | valor | % aprovação |
+|---|---|---|---|
+| F1 máximo | {{ r.cortes.corte_f1|f3 }} | F1 = {{ r.cortes.f1_max|f3 }} | {{ r.cortes.pct_aprovacao_f1|p3 }} |
+| custo mínimo (FN:FP = {{ cfg.custo_fn_fp[0] }}:{{ cfg.custo_fn_fp[1] }}) | {{ r.cortes.corte_custo|f3 }} | custo = {{ r.cortes.custo_min|i0 }} | {{ r.cortes.pct_aprovacao_custo|p3 }} |
+
+## 5. Scorecard
+
+### 5.1 Refino recursivo — log
+
+{% if res.log_refino|length %}{{ tab(res.log_refino) }}{% else %}Nenhuma ação necessária: a categorização inicial já atendia todas as restrições.{% endif %}
+
+
+Status: {{ r.status_refino }}. Faixas: {{ r.n_faixas_inicial }} → {{ r.n_faixas }}. Variáveis finais: {{ r.variaveis|join(', ') }}.
+
+### 5.2 Information Value
+
+{{ tab(res.scorecard.iv_por_variavel().to_frame('IV'), index=True) }}
+
+### 5.3 Scorecard final
+
+{{ tab(res.scorecard.tabela) }}
+
+### 5.4 Desempenho
+
+| modelo | AUC OOS | Gini OOS | KS OOS | AUC OOT | Gini OOT | KS OOT |
+|---|---|---|---|---|---|---|
+| Regressão logística contínua | {{ r.metricas_lr.oos.AUC|f3 }} | {{ r.metricas_lr.oos.Gini|f3 }} | {{ r.metricas_lr.oos.KS|f3 }} | {{ r.metricas_lr.oot.AUC|f3 }} | {{ r.metricas_lr.oot.Gini|f3 }} | {{ r.metricas_lr.oot.KS|f3 }} |
+| Scorecard inicial ({{ r.n_faixas_inicial }} faixas) | {{ r.metricas_scorecard_inicial.oos.AUC|f3 }} | {{ r.metricas_scorecard_inicial.oos.Gini|f3 }} | {{ r.metricas_scorecard_inicial.oos.KS|f3 }} | {{ r.metricas_scorecard_inicial.oot.AUC|f3 }} | {{ r.metricas_scorecard_inicial.oot.Gini|f3 }} | {{ r.metricas_scorecard_inicial.oot.KS|f3 }} |
+| Scorecard refinado ({{ r.n_faixas }} faixas) | {{ r.metricas_scorecard.oos.AUC|f3 }} | {{ r.metricas_scorecard.oos.Gini|f3 }} | {{ r.metricas_scorecard.oos.KS|f3 }} | {{ r.metricas_scorecard.oot.AUC|f3 }} | {{ r.metricas_scorecard.oot.Gini|f3 }} | {{ r.metricas_scorecard.oot.KS|f3 }} |
+
+![Score](figs/{{ figs.score_dist }})
+
+## 6. Estabilidade temporal
+
+### 6.1 Por safra (LR: PD; scorecard: score)
+
+{{ tab(res.por_safra) }}
+
+![Por safra](figs/{{ figs.por_safra }})
+
+### 6.2 Por variável (dev vs OOT)
+
+{{ tab(res.res_var, index=True) }}
+
+CSI máximo: {{ r.csi_max|f3 }} (referência: < 0,10 estável; > 0,25 quebra).
+
+{% if figs.betas %}
+### 6.3 Betas sobre WoE por janela
+
+{{ tab(res.betas, index=True) }}
+
+![Betas](figs/{{ figs.betas }})
+{% endif %}
+
+## 7. Grupos homogêneos e calibração da PD
+
+### 7.1 Malha recursiva — log
+
+{% if res.log_gh|length %}{{ tab(res.log_gh) }}{% else %}Nenhuma mescla necessária.{% endif %}
+
+
+Status: {{ r.status_gh }}. {{ r.k_gh }} GHs; cortes de score: {% for c in r.cortes_gh %}{{ c|i0 }}{% if not loop.last %}, {% endif %}{% endfor %}. Ordem preservada em todas as janelas válidas — dev: {{ r.ordem_gh_ok.dev }}; OOT: {{ r.ordem_gh_ok.OOT }}. HHI de concentração no OOT: {{ r.hhi|f3 }}.
+
+### 7.2 Mapa de GH
+
+{{ tab(res.mapa_gh, index=True) }}
+
+![Painel GH](figs/{{ figs.painel_gh }})
+![Calibração OOS vs OOT](figs/{{ figs.calib_oos_oot }})
+
+### 7.3 De-para Score → GH → PD (provisão e precificação)
+
+{{ tab(res.de_para, index=True) }}
+
+`PD_12m` é a taxa observada no OOT (PIT) — uso em provisão estágio 1; `PD_12m_conservadora` aplica a margem `{{ cfg.calibracao.moc }}` — uso em precificação. Para capital IRB a PD deve ser recalibrada à média de longo prazo.
+
+{% if res.desafiantes %}
+## 8. Modelos desafiantes
+
+Comparação em validação cruzada no desenvolvimento:
+
+{{ tab(res.desafiantes.comparacao_cv) }}
+
+Top-{{ cfg.desafiantes.top_k }} nas amostras OOS e OOT:
+
+{{ tab(res.desafiantes.resultados) }}
+
+{% if figs.desafiantes %}![Desafiantes](figs/{{ figs.desafiantes }}){% endif %}
+
+{% for nome, imp in res.desafiantes.importancias.items() %}
+Importância ({{ nome }}): {% for v, x in imp.head(8).items() %}{{ v }} ({{ x|f3 }}){% if not loop.last %}, {% endif %}{% endfor %}.
+{% endfor %}
+
+Leitura: a diferença de AUC entre o melhor desafiante e o scorecard no OOT mede o ganho de não linearidades/interações que o scorecard não captura; se for da ordem do erro amostral (≈ ±0,02 nos tamanhos do OOT), o scorecard é preferível por interpretabilidade, estabilidade e implantação.
+{% endif %}
+
+## 9. Limitações e monitoramento
+
+- A PD é calibrada na taxa do OOT ({{ r.safras_oot|length }} safras): serve a provisão PIT; capital IRB exige tendência central de longo prazo e margem de conservadorismo.
+- Indicadores por safra com poucas observações (PSI, AUC) flutuam por ruído amostral; interpretar PSI com o tamanho da amostra (Yurdakul, 2018) ou agregar safras.
+- Monitorar: PSI do score e distribuição por GH (mensal), CSI por variável (trimestral), taxa observada por GH vs PD calibrada com teste binomial (semestral) e reestimação dos betas por janela (anual ou a cada 6 safras).
+- Rejeitados não foram tratados (<em>reject inference</em>); o modelo aplica-se à população aprovada semelhante à de desenvolvimento.
+
+## Referências
+
+{% for ref in refs %}<p class="ref">{{ ref }}</p>
+{% endfor %}

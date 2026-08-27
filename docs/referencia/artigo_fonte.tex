@@ -1,0 +1,800 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{fontspec}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont[Scale=0.88]{Latin Modern Mono}
+% (sem padrões de hifenização pt-BR neste ambiente; nomes traduzidos manualmente)
+\renewcommand{\abstractname}{Resumo}
+\renewcommand{\contentsname}{Sumário}
+\renewcommand{\figurename}{Figura}
+\renewcommand{\tablename}{Tabela}
+\renewcommand{\refname}{Referências}
+\emergencystretch=2em
+\tolerance=2000
+\hyphenation{re-gres-são lo-gís-ti-ca pro-ba-bi-li-da-de es-ta-bi-li-da-de ca-te-go-ri-za-ção va-li-da-ção dis-cri-mi-na-ção ca-li-bra-ção mo-no-to-ni-ci-da-de de-sen-vol-vi-men-to co-e-fi-ci-en-tes ob-ser-va-ções in-ter-pre-ta-ção re-gu-la-tó-rio ca-rac-te-rís-ti-cas dis-tri-bui-ção he-te-ro-ge-nei-da-de si-mul-ta-ne-a-men-te sis-te-ma-ti-ca-men-te}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!60!black,citecolor=blue!60!black,urlcolor=blue!60!black]{hyperref}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{setspace}
+\setlength{\parskip}{3pt}
+\captionsetup{font=small,labelfont=bf}
+\renewcommand{\algorithmicrequire}{\textbf{Entrada:}}
+\renewcommand{\algorithmicensure}{\textbf{Saída:}}
+\floatname{algorithm}{Algoritmo}
+
+\newcommand{\pd}{\mathrm{PD}}
+\newcommand{\woe}{\mathrm{WoE}}
+\newcommand{\iv}{\mathrm{IV}}
+\newcommand{\auc}{\mathrm{AUC}}
+\newcommand{\ks}{\mathrm{KS}}
+\newcommand{\psiidx}{\mathrm{PSI}}
+\newcommand{\csi}{\mathrm{CSI}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{Regressão Logística, Scorecards e Validação Temporal em Risco de Crédito:\\ um pipeline reprodutível com PyCaret, escala de pontos, categorização por WoE e refino recursivo de estabilidade}}
+\author{Walter C. Neto\\ \small WCN Softwares --- São Paulo, Brasil\\ \small \texttt{waltercneto.github.io}}
+\date{Agosto de 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent Este artigo documenta, passo a passo, a construção e a validação de um modelo de probabilidade de \emph{default} (PD) para crédito a pessoa física, usando regressão logística como técnica central. O pipeline cobre: (i) geração de uma base simulada com processo gerador conhecido, o que permite auditar se o modelo recupera os sinais econômicos esperados; (ii) estimação e ajuste de hiperparâmetros com a biblioteca PyCaret, validação cruzada estratificada e avaliação em \emph{holdout} por AUC, Gini e KS; (iii) comparação com treze algoritmos alternativos; (iv) escolha do corte de aprovação por métrica estatística e por custo de negócio; (v) interpretação por coeficientes, \emph{odds ratios} e valores SHAP; (vi) transformação da probabilidade em uma escala de pontos 100--900 fundamentada na parametrização \emph{points-to-double-the-odds} (PDO); (vii) construção de um \emph{scorecard} transparente com variáveis categorizadas via \emph{Weight of Evidence} (WoE) e \emph{Information Value} (IV); (viii) validação temporal com a safra da operação como variável de controle, separando amostras \emph{out-of-sample} (OOS) e \emph{out-of-time} (OOT) e medindo estabilidade por PSI, CSI, correlação de ordenação do WoE e coeficientes em janelas de tempo; e (ix) um algoritmo recursivo que refaz a categorização e o modelo até que restrições de monotonicidade, estabilidade e coerência de sinal sejam simultaneamente satisfeitas. O modelo final atinge AUC de 0{,}725 no \emph{holdout} (Gini 0{,}449; KS 0{,}347), o \emph{scorecard} refinado preserva praticamente todo o poder discriminante (AUC 0{,}740 OOS e 0{,}714 OOT) com 31 faixas em vez de 37, e todos os coeficientes mantêm o sinal esperado em todas as janelas temporais. Cada técnica é acompanhada da teoria estatística e da racionalidade econômica que a sustentam, com referências para aprofundamento, e o texto discute as limitações do exercício e sua ligação com os requisitos regulatórios brasileiros (Resoluções CMN 4.557 e 4.966, Circular BCB 3.648) e internacionais (Basileia II/III, IFRS 9, SR 11-7).
+
+\medskip
+\noindent\textbf{Palavras-chave:} risco de crédito; probabilidade de \emph{default}; regressão logística; \emph{scorecard}; \emph{weight of evidence}; validação \emph{out-of-time}; estabilidade populacional; PyCaret.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Introdução}
+\label{sec:intro}
+
+A probabilidade de \emph{default} (PD) é o parâmetro central da gestão de risco de crédito. Ela alimenta a perda esperada $\mathrm{EL} = \pd \times \mathrm{LGD} \times \mathrm{EAD}$, que sustenta tanto o provisionamento contábil sob IFRS~9 e Resolução CMN 4.966 \citep{ifrs9,cmn4966} quanto a exigência de capital sob a abordagem IRB de Basileia \citep{bcbs2006,gordy2003,bcb3648}. Em ambos os regimes, a instituição precisa demonstrar que o modelo discrimina bons e maus pagadores, que está calibrado e que permanece estável ao longo do tempo --- e é justamente sobre essas três dimensões que a validação independente concentra seus testes \citep{bcbs2005,sr117}.
+
+A regressão logística permanece a técnica de referência para modelos de PD em crédito ao varejo. As razões são conhecidas: o modelo é interpretável coeficiente a coeficiente, aceita restrições de sinal ditadas pela lógica de negócio, converte-se de forma natural em uma tabela de pontos (o \emph{scorecard}) e, em bases de dimensão moderada, tem desempenho comparável ao de técnicas mais complexas \citep{hand1997,lessmann2015,thomas2002,siddiqi2017}. Ferramentas de \emph{low-code} como o PyCaret \citep{pycaret} reduziram drasticamente o custo de estimar, comparar e validar tais modelos, mas não substituem o entendimento do que cada etapa faz nem a disciplina de validação exigida pelo regulador.
+
+Este trabalho tem dois objetivos. O primeiro é didático: apresentar, na ordem em que um modelador executaria, cada etapa da construção de um modelo de PD e de seu \emph{scorecard}, explicitando a teoria estatística e a racionalidade econômica que justificam cada escolha. O segundo é metodológico: propor um procedimento recursivo de refino que trata a estabilidade temporal não como um teste \emph{a posteriori}, mas como um conjunto de restrições que o modelo deve satisfazer por construção. Para isso, a safra da operação --- a data de contratação --- é usada como variável de controle: ela não entra como preditor, mas organiza a divisão em amostras de desenvolvimento, \emph{out-of-sample} (OOS) e \emph{out-of-time} (OOT) e as janelas em que estabilidade é medida.
+
+Usamos uma base simulada com processo gerador de dados (DGP) conhecido. Isso tem um custo --- os resultados não descrevem uma carteira real --- e um benefício decisivo para um texto didático: sabemos qual é a ``verdade'' e podemos verificar se cada técnica a recupera. Como contraponto, o mesmo pipeline é aplicado à base pública de cartões de crédito de Taiwan \citep{yeh2009}.
+
+O restante do artigo está organizado assim. A Seção~\ref{sec:teoria} apresenta a fundamentação teórica. A Seção~\ref{sec:metodo} descreve a base, o pipeline e o algoritmo de refino. A Seção~\ref{sec:resultados} reporta os resultados de cada etapa. A Seção~\ref{sec:discussao} discute limitações e implicações regulatórias, e a Seção~\ref{sec:conclusao} conclui.
+
+% =====================================================================
+\section{Fundamentação teórica}
+\label{sec:teoria}
+
+\subsection{Default, PD e o papel do modelo no arcabouço prudencial}
+
+Um contrato está em \emph{default} quando o devedor deixa de honrá-lo por um período material --- a convenção de Basileia e da Resolução CMN 4.966 é o atraso superior a 90 dias, ou a evidência de que o pagamento integral é improvável \citep{bcbs2006,cmn4966}. O modelo de PD estima $\Pr(Y=1 \mid \mathbf{x})$, em que $Y$ indica a ocorrência de \emph{default} em um horizonte fixo (tipicamente 12 meses) e $\mathbf{x}$ reúne as características observáveis do tomador e da operação na data da decisão.
+
+Na abordagem IRB, a PD entra na fórmula de capital derivada do modelo assintótico de fator único (ASRF) de \citet{gordy2003} e \citet{vasicek2002}, que por sua vez descende da visão estrutural de \citet{merton1974}: o \emph{default} ocorre quando um índice latente de qualidade de crédito, com um componente sistêmico e um idiossincrático, cruza um limiar. Sob IFRS~9 a PD é usada em três estágios de deterioração, com horizonte de 12 meses no estágio 1 e vitalício nos estágios 2 e 3. Em ambos os casos, o modelo estatístico precisa satisfazer três propriedades: \emph{discriminação} (ordenar corretamente tomadores por risco), \emph{calibração} (a PD prevista deve corresponder à frequência observada) e \emph{estabilidade} (as duas anteriores devem se manter ao longo do tempo e entre subpopulações). A validação descrita em \citet{bcbs2005} organiza-se em torno dessas três propriedades.
+
+\subsection{Regressão logística}
+\label{sec:lr}
+
+O modelo logístico postula que o logaritmo da razão de chances (\emph{log-odds}) é linear nas covariáveis:
+\begin{equation}
+\operatorname{logit}\big(\pd_i\big) = \ln \frac{\pd_i}{1-\pd_i} = \beta_0 + \boldsymbol{\beta}^{\top}\mathbf{x}_i,
+\qquad
+\pd_i = \frac{1}{1+e^{-(\beta_0 + \boldsymbol{\beta}^{\top}\mathbf{x}_i)}} .
+\label{eq:logit}
+\end{equation}
+Os parâmetros são obtidos por máxima verossimilhança, maximizando
+\begin{equation}
+\ell(\beta_0,\boldsymbol{\beta}) = \sum_{i=1}^{n}\Big[y_i \ln \pd_i + (1-y_i)\ln(1-\pd_i)\Big],
+\end{equation}
+função côncava cujo ótimo é encontrado por Newton--Raphson ou métodos quase-Newton como L-BFGS \citep{hosmer2013,hastie2009}. A interpretação econômica dos coeficientes é direta: $e^{\beta_j}$ é o \emph{odds ratio} associado a um incremento unitário em $x_j$, mantidas as demais covariáveis constantes. Quando as variáveis são padronizadas ($z$-score), $e^{\beta_j}$ mede o efeito de um desvio-padrão, o que torna os coeficientes comparáveis entre si.
+
+A versão regularizada, usada pelo \code{scikit-learn} por padrão \citep{sklearn}, subtrai da verossimilhança a penalidade $\frac{1}{2C}\lVert \boldsymbol{\beta}\rVert_2^2$ (ridge, \citealp{hoerl1970}). O hiperparâmetro $C$ controla o viés introduzido em troca de variância menor; com $n$ grande em relação ao número de covariáveis, como aqui, a penalidade tem efeito desprezível, e é isso que o procedimento de \emph{tuning} da Seção~\ref{sec:resultados-lr} confirma. A padronização prévia é necessária porque a penalidade não é invariante à escala das covariáveis.
+
+Uma leitura útil é a de que a regressão logística é um classificador \emph{semi-naive Bayes}: se $\mathbf{x}$ tem distribuição Gaussiana com covariância comum nas duas classes, o \emph{log-odds} é exatamente linear em $\mathbf{x}$ (a análise discriminante linear); a logística relaxa a hipótese distribucional e estima a mesma fronteira diretamente \citep{hastie2009}. Isso explica por que, em bases cujo DGP é linear no \emph{logit}, logística, LDA e \emph{ridge} apresentam desempenho praticamente idêntico --- resultado que se verá na Seção~\ref{sec:compare}.
+
+\subsection{Medidas de discriminação e de calibração}
+\label{sec:metricas}
+
+\paragraph{Curva ROC e AUC.} Para cada corte $c$ sobre o escore, a curva ROC registra a taxa de verdadeiros positivos $\mathrm{TPR}(c)$ contra a taxa de falsos positivos $\mathrm{FPR}(c)$. A área sob a curva (AUC) é igual à probabilidade de que um \emph{default} escolhido ao acaso receba escore de risco maior que um não-\emph{default} escolhido ao acaso \citep{hanley1982} --- ou seja, é a estatística $U$ de Mann--Whitney normalizada. Um modelo sem informação tem $\auc=0{,}5$.
+
+\paragraph{Gini e \emph{accuracy ratio}.} O coeficiente de Gini usado em crédito, também chamado \emph{accuracy ratio} (AR) ou \emph{Somers' D}, é a transformação linear $\mathrm{Gini}=2\,\auc-1$ \citep{engelmann2003}; ele mede a área entre a curva ROC e a diagonal, relativa ao máximo possível. Em modelos de PD para varejo, valores entre 0{,}40 e 0{,}60 são típicos em aplicação (\emph{application scoring}) e maiores em comportamento (\emph{behavioural scoring}) \citep{siddiqi2017}.
+
+\paragraph{Estatística KS.} A estatística de Kolmogorov--Smirnov é a distância máxima entre as funções de distribuição acumulada do escore nas duas classes:
+\begin{equation}
+\ks = \max_c \big|\mathrm{TPR}(c)-\mathrm{FPR}(c)\big| .
+\end{equation}
+Ao contrário do AUC, que integra sobre todos os cortes, o KS mede a separação no melhor corte; é a métrica preferida em muitas áreas de crédito porque corresponde ao ponto em que um corte único de aprovação é mais eficaz.
+
+\paragraph{Tabela de decis.} Ordenando a carteira pelo escore e dividindo-a em dez grupos de igual tamanho, obtém-se a taxa de \emph{default} observada e a PD média por decil. Três leituras decorrem: (i) a \emph{ordenação} deve ser monotônica; (ii) a \emph{concentração} de \emph{defaults} nos primeiros decis (curva de captura ou \emph{lift}) mede a utilidade prática; (iii) a proximidade entre PD média e taxa observada por decil é um teste visual de \emph{calibração}.
+
+\paragraph{Calibração.} A curva de calibração (diagrama de confiabilidade) compara, por faixas de probabilidade prevista, a frequência observada. Um modelo bem calibrado situa-se sobre a diagonal. O escore de Brier \citep{brier1950}, $\frac1n\sum_i(\pd_i-y_i)^2$, resume simultaneamente calibração e discriminação. Modelos de PD para IFRS~9 exigem calibração \emph{point-in-time}; modelos para capital IRB exigem calibração a uma tendência central de longo prazo \citep{bcbs2005}.
+
+\paragraph{Corte de aprovação.} O escore contínuo vira decisão por um limiar. Otimizar F1 (média harmônica de precisão e \emph{recall}) é uma solução estatística neutra; na prática de crédito, o limiar é a solução de um problema de custo em que um falso negativo (mau aprovado) custa a perda esperada da operação e um falso positivo (bom recusado) custa a margem financeira perdida. A razão entre esses custos determina o corte, e é comum que ela seja da ordem de 5 a 20 para 1.
+
+\subsection{Escala de pontos e a parametrização PDO}
+\label{sec:pdo}
+
+Escores comerciais são comunicados em uma escala de pontos, e não em probabilidade, por razões de estabilidade de comunicação, de política de crédito (cortes fixos por faixa) e de comparabilidade entre modelos. A convenção da indústria \citep{siddiqi2017,anderson2007,thomas2002} define
+\begin{equation}
+\mathrm{Score} = \mathrm{Offset} + \mathrm{Factor}\cdot \ln\!\big(\mathrm{odds}_{\text{bom}}\big),\qquad
+\mathrm{Factor}=\frac{\mathrm{PDO}}{\ln 2},\qquad
+\mathrm{Offset}=\mathrm{Score}_0-\mathrm{Factor}\cdot\ln(\mathrm{odds}_0),
+\label{eq:pdo}
+\end{equation}
+em que $\mathrm{odds}_{\text{bom}}=(1-\pd)/\pd$, PDO (\emph{points to double the odds}) é o número de pontos que dobra as chances de ser bom pagador, e o par $(\mathrm{Score}_0,\mathrm{odds}_0)$ fixa um ponto de ancoragem (por exemplo, 600 pontos correspondem a \emph{odds} de 20:1). Como a transformação é afim no \emph{log-odds}, ela preserva toda a ordenação do modelo logístico e, portanto, AUC, Gini e KS. A alternativa adotada neste trabalho --- calibrar Factor e Offset de modo que os percentis extremos da PD caiam nos limites 100 e 900 --- ocupa toda a faixa visual da escala ao custo de um PDO implícito maior; a Seção~\ref{sec:discussao} discute o \emph{trade-off}.
+
+\subsection{Weight of Evidence, Information Value e scorecards}
+\label{sec:woe}
+
+A ideia de medir a evidência de uma observação pelo logaritmo da razão de verossimilhanças remonta a \citet{good1950} e à teoria da informação de \citet{kullback1951}. Para uma variável categorizada em faixas $j=1,\dots,J$, o \emph{Weight of Evidence} da faixa $j$ é
+\begin{equation}
+\woe_j = \ln\frac{\Pr(\text{faixa } j\mid \text{bom})}{\Pr(\text{faixa } j\mid \text{mau})}
+= \ln\frac{n_j^{B}/N^{B}}{n_j^{M}/N^{M}},
+\label{eq:woe}
+\end{equation}
+com a convenção de que valores positivos indicam faixas mais seguras. O \emph{Information Value} da variável,
+\begin{equation}
+\iv = \sum_{j=1}^{J}\Big(\frac{n_j^{B}}{N^{B}}-\frac{n_j^{M}}{N^{M}}\Big)\woe_j ,
+\label{eq:iv}
+\end{equation}
+é a divergência simétrica de Kullback--Leibler entre as distribuições das faixas nas duas classes e resume o poder preditivo univariado. A regra prática de \citet{siddiqi2017} classifica $\iv<0{,}02$ como inútil, $0{,}02$--$0{,}10$ fraco, $0{,}10$--$0{,}30$ médio e $>0{,}30$ forte (valores muito altos sugerem vazamento de informação).
+
+Substituir cada variável pelo seu WoE e ajustar uma regressão logística sobre as variáveis transformadas tem uma propriedade notável: se as variáveis fossem condicionalmente independentes dada a classe, o \emph{log-odds} seria exatamente $\ln(\mathrm{odds}_{\text{prior}})-\sum_j \woe_j$, isto é, todos os coeficientes seriam iguais a $-1$ (com a convenção de sinal da Eq.~\ref{eq:woe}). Coeficientes estimados afastados de $-1$ medem, portanto, o quanto a correlação entre variáveis redistribui a evidência; coeficientes positivos indicam contradição com a lógica univariada e são, na prática, motivo de exclusão da variável.
+
+O \emph{scorecard} aloca os pontos do modelo por faixa, distribuindo o intercepto igualmente entre as $K$ variáveis:
+\begin{equation}
+\text{pontos}_{kj} = -\mathrm{Factor}\cdot\beta_k\cdot\woe_{kj} + \frac{\mathrm{Offset}-\mathrm{Factor}\cdot\beta_0}{K},
+\label{eq:pontos}
+\end{equation}
+de modo que o escore do cliente é a soma dos pontos das faixas em que ele cai. A categorização (\emph{coarse classing}) sacrifica um pouco de discriminação em troca de robustez a \emph{outliers}, tratamento natural de valores ausentes, transparência regulatória e imposição de \emph{monotonicidade}: a taxa de \emph{default} deve variar em uma única direção ao longo das faixas de uma variável ordinal, sob pena de o modelo capturar ruído amostral em vez de relação econômica \citep{zeng2014,siddiqi2017}.
+
+\subsection{Validação temporal e medidas de estabilidade}
+\label{sec:estabilidade}
+
+A safra (\emph{vintage}) é a coorte de contratos originados em um mesmo período. A análise por safras, herdada da demografia \citep{glenn1977} e formalizada em crédito por \citet{breeden2016}, decompõe o risco em três eixos: a maturação do contrato (\emph{lifecycle}), a qualidade da safra na origem (\emph{vintage}) e o ambiente macroeconômico no calendário (\emph{environment}). Um modelo de PD de aplicação captura o segundo eixo; ele não deve usar a safra como preditor, mas deve ser validado \emph{através} dela: uma amostra \emph{out-of-sample} (OOS) sorteada dentro do período de desenvolvimento testa sobreajuste, enquanto uma amostra \emph{out-of-time} (OOT), composta pelas safras mais recentes, testa se as relações estimadas sobrevivem à passagem do tempo \citep{bcbs2005,sr117}.
+
+\paragraph{PSI.} O \emph{Population Stability Index} compara a distribuição do escore em $J$ faixas entre a população de referência ($r_j$) e a atual ($c_j$):
+\begin{equation}
+\psiidx=\sum_{j=1}^{J}(c_j-r_j)\ln\frac{c_j}{r_j},
+\label{eq:psi}
+\end{equation}
+também uma divergência simétrica de Kullback--Leibler. As referências usuais são $\psiidx<0{,}10$ (estável), $0{,}10$--$0{,}25$ (atenção) e $>0{,}25$ (mudança significativa). \citet{yurdakul2018} mostra que, sob a hipótese nula de distribuições iguais, $\psiidx$ escala com $(1/n_r+1/n_c)$, de modo que amostras pequenas produzem PSI elevado por mero ruído amostral --- ressalva essencial para interpretar resultados por safra mensal.
+
+\paragraph{CSI.} O \emph{Characteristic Stability Index} aplica a mesma fórmula às faixas de cada variável explicativa, isolando qual característica está mudando de distribuição.
+
+\paragraph{Estabilidade da ordenação e dos coeficientes.} Além da distribuição, importa que a \emph{relação} com o \emph{default} se mantenha: o WoE de cada faixa deve preservar o sinal e a ordem entre as faixas (medida aqui pela correlação de Spearman entre o vetor de WoE no desenvolvimento e no OOT), e os coeficientes reestimados em janelas de tempo devem manter o sinal. Este último teste é a versão temporal da análise de estabilidade de coeficientes recomendada por \citet{bcbs2005}.
+
+\subsection{Racionalidade econômica das variáveis}
+\label{sec:economia}
+
+As covariáveis usadas na simulação são as que a literatura e a prática de crédito ao consumidor consideram determinantes da PD, e cada uma tem um mecanismo econômico identificável:
+
+\begin{itemize}
+\item \textbf{Idade.} Pela hipótese do ciclo de vida \citep{modigliani1954}, o consumo é suavizado sobre a renda esperada; tomadores jovens têm renda corrente abaixo da permanente, mais incerteza e menor patrimônio de reserva, elevando a PD.
+\item \textbf{Renda.} Capacidade de pagamento absoluta e colchão para choques; entra em logaritmo porque o efeito marginal decresce com o nível.
+\item \textbf{Tempo de emprego.} \emph{Proxy} de estabilidade de renda e de custo de desemprego; correlaciona-se com vínculo formal e capital humano específico.
+\item \textbf{Utilização do limite.} Indicador de restrição de liquidez: \citet{gross2002} mostram que a utilização elevada de cartão antecede inadimplência e falência pessoal, porque tomadores restritos usam o crédito rotativo como financiamento de último recurso.
+\item \textbf{Comprometimento de renda (DTI).} Fração da renda absorvida por serviço de dívida; mede diretamente a folga para absorver choques.
+\item \textbf{Atrasos nos últimos 12 meses.} Comportamento passado é o melhor preditor de comportamento futuro (persistência); é a variável mais informativa em quase todos os \emph{scorecards} de comportamento \citep{thomas2002}.
+\item \textbf{Consultas ao bureau nos últimos 6 meses.} Sinal de busca intensa por crédito, consistente com seleção adversa: sob informação assimétrica, quem procura muito crédito tende a ser mais arriscado \citep{stiglitz1981}.
+\item \textbf{Tipo de ocupação.} Servidores públicos e aposentados têm renda mais estável e, no Brasil, acesso a consignação; autônomos têm renda mais volátil.
+\item \textbf{Posse de imóvel.} Riqueza e possibilidade de colateral; também reduz o incentivo ao \emph{default} estratégico.
+\end{itemize}
+
+A verificação de que os sinais estimados coincidem com esses mecanismos é o primeiro teste qualitativo de qualquer modelo de PD --- e é o que motiva a restrição de sinal do algoritmo de refino da Seção~\ref{sec:refino}.
+
+% =====================================================================
+\section{Metodologia}
+\label{sec:metodo}
+
+\subsection{Base simulada e processo gerador de dados}
+\label{sec:dgp}
+
+Foram simuladas $n=10\,000$ operações com semente fixa (\code{numpy} \code{default\_rng(42)}). As distribuições marginais reproduzem ordens de grandeza plausíveis para crédito a pessoa física no Brasil: idade uniforme em $[21,70)$; renda log-normal com mediana de aproximadamente R\$\,3\,600; tempo de emprego exponencial com média de 5 anos; utilização do limite $\sim \mathrm{Beta}(2,3)$; comprometimento de renda $\sim \mathrm{Beta}(2,5)$; atrasos em 12 meses $\sim \mathrm{Poisson}(0{,}4)$; consultas em 6 meses $\sim \mathrm{Poisson}(1{,}2)$; tipo de ocupação com probabilidades 50\% CLT, 25\% autônomo, 15\% servidor e 10\% aposentado; posse de imóvel Bernoulli(0{,}5). O \emph{default} é sorteado de uma Bernoulli cuja probabilidade segue o \emph{logit}
+\begin{equation}
+\begin{aligned}
+\eta_i ={}& -3{,}0 - 0{,}02\,(\text{idade}_i-40) - 0{,}40\,\ln\!\big(\text{renda}_i/3600\big) - 0{,}05\,\text{tempo}_i \\
+&+ 2{,}00\,\text{utiliz}_i + 0{,}60\,\text{atrasos}_i + 2{,}50\,\text{DTI}_i + 0{,}25\,\text{consultas}_i \\
+&- 0{,}50\,\text{imóvel}_i + \gamma_{\text{ocup}(i)} + \varepsilon_i,\qquad \varepsilon_i\sim N(0,\,0{,}3^2),
+\end{aligned}
+\label{eq:dgp}
+\end{equation}
+com $\gamma_{\text{CLT}}=0$, $\gamma_{\text{autônomo}}=0{,}4$, $\gamma_{\text{servidor}}=-0{,}5$ e $\gamma_{\text{aposentado}}=-0{,}3$. O termo $\varepsilon_i$ representa heterogeneidade não observada; ele impõe um teto ao AUC alcançável por qualquer modelo que use apenas as covariáveis observadas. A taxa de \emph{default} resultante foi de 21{,}58\%. A base é estacionária por construção: a safra, adicionada posteriormente (Seção~\ref{sec:metodo-safra}), é independente das covariáveis e do \emph{default}, de modo que os testes de estabilidade medem apenas ruído amostral --- o que é útil para calibrar o que ``estável'' significa.
+
+\subsection{Pipeline de estimação com PyCaret}
+\label{sec:pipeline}
+
+A função \code{setup} do PyCaret fixa o experimento: alvo \code{default}, divisão 70/30 estratificada (7\,000 observações de treino e 3\,000 de \emph{holdout}), \emph{one-hot encoding} da variável categórica (que leva as 10 colunas originais a 13), padronização $z$-score das numéricas, imputação simples e validação cruzada \code{StratifiedKFold} com 5 dobras (\code{session\_id=42}). Em seguida, \code{create\_model('lr')} estima a regressão logística com penalidade L2 e $C=1$, e \code{tune\_model} executa busca aleatória em 20 configurações de $C$ otimizando AUC. O modelo é avaliado no \emph{holdout} com \code{predict\_model(raw\_score=True)}, que devolve $\Pr(Y=1)$ diretamente. O comando \code{compare\_models} estima, no mesmo experimento, treze algoritmos alternativos.
+
+\subsection{Corte de aprovação, interpretação e base real}
+
+O corte que maximiza F1 é obtido por \code{optimize\_threshold}. Um segundo corte é obtido minimizando o custo total $10\cdot\mathrm{FN}+1\cdot\mathrm{FP}$ em uma grade de limiares entre 0{,}02 e 0{,}60, refletindo a assimetria típica entre a perda de um mau aprovado e a margem de um bom recusado. A interpretação usa os coeficientes padronizados e seus \emph{odds ratios}, a importância de variáveis do PyCaret e valores SHAP calculados com \code{shap.LinearExplainer} \citep{lundberg2017,shapley1953}. Como contraponto com dados reais, o mesmo pipeline foi aplicado à base de 24\,000 clientes de cartão de crédito de Taiwan distribuída com o PyCaret \citep{yeh2009}.
+
+\subsection{Escala 100--900}
+
+A Eq.~\eqref{eq:pdo} foi implementada com dois modos. No modo padrão, PDO$=40$, ancorado em 600 pontos para \emph{odds} de 20:1. No modo ``faixa cheia'', adotado nos resultados, Factor e Offset são resolvidos para que os percentis 0{,}5\% e 99{,}5\% da PD no \emph{holdout} sejam mapeados em 900 e 100 pontos, respectivamente; o escore é truncado nesses limites e arredondado ao inteiro.
+
+\subsection{Scorecard por WoE}
+\label{sec:metodo-scorecard}
+
+Para o \emph{scorecard} foi usada uma divisão própria 70/30 estratificada. As cinco variáveis contínuas (idade, renda, tempo de emprego, utilização e DTI) foram categorizadas em quintis do treino; as variáveis de contagem receberam cortes manuais (atrasos: 0, 1, 2+; consultas: 0, 1--2, 3+; imóvel: não/sim); o tipo de ocupação foi mantido em suas quatro categorias. Calculou-se o WoE (Eq.~\ref{eq:woe}, com correção de continuidade de 0{,}5 em cada contagem) e o IV (Eq.~\ref{eq:iv}) por faixa, ajustou-se uma regressão logística sem regularização ($C=10^6$) sobre as variáveis transformadas em WoE e alocaram-se os pontos pela Eq.~\eqref{eq:pontos}, com Factor e Offset herdados da escala.
+
+\subsection{Safra como variável de controle}
+\label{sec:metodo-safra}
+
+Cada operação recebeu uma safra mensal sorteada uniformemente entre 2023-01 e 2024-12. As seis safras mais recentes (2024-07 a 2024-12; 2\,517 operações) formam o OOT. As demais (7\,483 operações) constituem o desenvolvimento, do qual 20\% (1\,497) foram separados como OOS estratificado e 80\% (5\,986) usados no treino. No PyCaret, o OOT foi passado como \code{test\_data} e a safra como \code{ignore\_features}, de modo que o \emph{holdout} nativo do experimento passa a ser a amostra fora do tempo. Para cada safra calcularam-se taxa de \emph{default}, PD média, AUC, Gini, KS e PSI do escore em decis definidos no OOS. Por variável e faixa, compararam-se taxa de \emph{default}, WoE e distribuição entre desenvolvimento e OOT, resumidos por correlação de Spearman do WoE, número de faixas com inversão de sinal e CSI. Por fim, a regressão sobre WoE foi reestimada em cada trimestre para verificar o sinal dos coeficientes.
+
+\subsection{Algoritmo recursivo de refino}
+\label{sec:refino}
+
+O refino trata as propriedades desejadas como restrições e aplica, a cada iteração, a correção menos destrutiva possível (Algoritmo~\ref{alg:refino}). As restrições são: IV mínimo de 0{,}02; população mínima de 5\% por faixa; monotonicidade do WoE nas variáveis numéricas; ausência de inversão de sinal do WoE entre desenvolvimento e OOT; correlação de Spearman do WoE $\ge 0{,}80$; CSI $\le 0{,}10$; e coeficientes negativos (com a convenção da Eq.~\ref{eq:woe}) no desenvolvimento e em toda janela semestral. A ordem de verificação privilegia mesclar faixas adjacentes (ou, em variáveis nominais, a categoria de WoE mais próximo) antes de descartar variáveis, e só testa os coeficientes quando nenhuma faixa exige ação --- porque o descarte de uma variável altera os coeficientes das demais por multicolinearidade, o algoritmo remove uma variável por iteração.
+
+\begin{algorithm}[H]
+\caption{Refino recursivo de faixas e variáveis sob restrições de estabilidade}
+\label{alg:refino}
+\begin{algorithmic}[1]
+\Require Bases de desenvolvimento e OOT, especificação inicial de faixas $\mathcal{S}$, restrições $\mathcal{R}$
+\Ensure Especificação $\mathcal{S}^*$ e modelo que satisfazem $\mathcal{R}$
+\For{$t=1,\dots,\text{max\_iter}$}
+  \State Categorizar desenvolvimento e OOT segundo $\mathcal{S}$; calcular WoE, IV, distribuição por faixa
+  \State $\text{agiu} \gets \textbf{falso}$
+  \ForAll{variável $v\in\mathcal{S}$}
+     \If{$\iv_v<\iv_{\min}$ \textbf{ou} $v$ tem uma única faixa} remover $v$; $\text{agiu}\gets\textbf{verdadeiro}$
+     \ElsIf{alguma faixa tem população $<n_{\min}$} mesclar com a vizinha de WoE mais próximo
+     \ElsIf{$v$ numérica e WoE não monotônico} mesclar o primeiro par adjacente fora de ordem
+     \ElsIf{alguma faixa inverte o sinal do WoE no OOT} mesclar a de maior $|\woe|$ com a vizinha mais próxima
+     \ElsIf{$\rho_{\text{Spearman}}(\woe^{\text{dev}},\woe^{\text{OOT}})<\rho_{\min}$} mesclar a faixa de maior discordância de posto
+     \ElsIf{$\csi_v>\csi_{\max}$} mesclar a faixa de maior contribuição, ou remover $v$ se restarem duas
+     \EndIf
+     \State registrar a ação no \emph{log}; $\text{agiu}\gets\textbf{verdadeiro}$ se houve ação
+  \EndFor
+  \If{agiu} \textbf{continuar} \EndIf \Comment{refaz a categorização antes de testar coeficientes}
+  \State Ajustar regressão logística sobre WoE no desenvolvimento e em cada janela temporal
+  \If{$\max_{v,\text{janela}}\beta_v>\beta_{\text{tol}}$} remover a variável de maior $\beta$; \textbf{continuar}
+  \Else\ \textbf{parar} \EndIf
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+% =====================================================================
+\section{Resultados}
+\label{sec:resultados}
+
+\subsection{Regressão logística: validação cruzada e \emph{holdout}}
+\label{sec:resultados-lr}
+
+A Tabela~\ref{tab:cv} reporta as métricas por dobra. O AUC médio de 0{,}7237 com desvio-padrão de 0{,}016 indica um modelo estável entre partições. A busca de hiperparâmetros não superou o modelo com $C=1$ --- o PyCaret reportou que o original foi mantido --- o que era esperado: com 7\,000 observações e 12 colunas, a regularização é irrelevante e a verossimilhança domina. A acurácia próxima de 0{,}80 e o \emph{recall} baixo (0{,}15) decorrem do corte padrão de 0{,}5 em uma base com 21{,}6\% de \emph{defaults}; essas métricas dependem do corte e não medem a qualidade do modelo, razão pela qual a avaliação em crédito se apoia em AUC, Gini e KS.
+
+\begin{table}[H]
+\centering\small
+\caption{Validação cruzada estratificada (5 dobras) da regressão logística no treino.}
+\label{tab:cv}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Dobra & Acurácia & AUC & Recall & Precisão & F1 & Kappa & MCC \\
+\midrule
+0 & 0,7971 & 0,7301 & 0,1358 & 0,6406 & 0,2240 & 0,1607 & 0,2261 \\
+1 & 0,7914 & 0,7173 & 0,1358 & 0,5694 & 0,2193 & 0,1485 & 0,2002 \\
+2 & 0,7929 & 0,7125 & 0,1457 & 0,5789 & 0,2328 & 0,1599 & 0,2116 \\
+3 & 0,7921 & 0,7064 & 0,1689 & 0,5604 & 0,2595 & 0,1774 & 0,2210 \\
+4 & 0,8043 & 0,7522 & 0,1683 & 0,6986 & 0,2713 & 0,2044 & 0,2746 \\
+\midrule
+Média & 0,7956 & 0,7237 & 0,1509 & 0,6096 & 0,2414 & 0,1702 & 0,2267 \\
+Desvio & 0,0048 & 0,0162 & 0,0149 & 0,0526 & 0,0204 & 0,0194 & 0,0255 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No \emph{holdout} de 3\,000 observações o modelo obteve $\auc=0{,}7246$, $\mathrm{Gini}=0{,}4492$ e $\ks=0{,}3472$, em linha com a validação cruzada. A Figura~\ref{fig:roc} mostra a curva ROC, a matriz de confusão no corte de 0{,}5 e a curva de calibração; esta última acompanha a diagonal em toda a faixa de probabilidades, o que é consistente com um modelo cuja forma funcional coincide com a do DGP. O teto teórico de discriminação é limitado pelo ruído $\varepsilon_i$ da Eq.~\eqref{eq:dgp}: o AUC obtido é o de um modelo essencialmente correto em uma população com heterogeneidade não observada.
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\linewidth]{cell12_1.png}\caption{Curva ROC (treino e holdout).}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\linewidth]{cell13_1.png}\caption{Matriz de confusão, corte 0,5.}\end{subfigure}\\[4pt]
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\linewidth]{cell14_1.png}\caption{Curva de calibração.}\end{subfigure}\hfill
+\begin{subfigure}{0.48\textwidth}\includegraphics[width=\linewidth]{cell15_1.png}\caption{Importância (módulo dos coeficientes).}\end{subfigure}
+\caption{Diagnósticos padrão do PyCaret para a regressão logística.}
+\label{fig:roc}
+\end{figure}
+
+\subsection{Coeficientes, \emph{odds ratios} e recuperação do DGP}
+
+A Tabela~\ref{tab:coefs} lista os coeficientes padronizados. Todos os sinais coincidem com o DGP e com a racionalidade econômica da Seção~\ref{sec:economia}: atrasos, utilização e DTI elevam o risco; idade, tempo de emprego, renda e imóvel o reduzem; entre as ocupações, autônomo é a mais arriscada e servidor a menos. Como as variáveis foram padronizadas, os coeficientes medem o efeito de um desvio-padrão e são comparáveis: as três variáveis de comportamento e capacidade de pagamento (atrasos, utilização e DTI) têm efeito praticamente igual, com \emph{odds ratio} de 1{,}46 a 1{,}47 por desvio-padrão. As quatro \emph{dummies} de ocupação são estimadas com \emph{one-hot} completo; a penalidade L2 resolve a colinearidade com o intercepto, e por isso os coeficientes devem ser lidos como contrastes em torno da média, não em relação a uma categoria-base.
+
+\begin{table}[H]
+\centering\small
+\caption{Coeficientes padronizados e \emph{odds ratios} (intercepto $=-1{,}4946$).}
+\label{tab:coefs}
+\begin{tabular}{lrrl}
+\toprule
+Variável & $\beta$ & $e^{\beta}$ & Sinal esperado (DGP) \\
+\midrule
+n\_atrasos\_12m & $+0{,}3861$ & 1,471 & $+$ \\
+utilizacao & $+0{,}3845$ & 1,469 & $+$ \\
+dti & $+0{,}3807$ & 1,463 & $+$ \\
+idade & $-0{,}3027$ & 0,739 & $-$ \\
+tempo\_emprego & $-0{,}2748$ & 0,760 & $-$ \\
+consultas\_6m & $+0{,}2500$ & 1,284 & $+$ \\
+possui\_imovel & $-0{,}2175$ & 0,805 & $-$ \\
+renda & $-0{,}1963$ & 0,822 & $-$ \\
+tipo\_ocupacao\_autonomo & $+0{,}1746$ & 1,191 & $+$ \\
+tipo\_ocupacao\_servidor & $-0{,}1669$ & 0,846 & $-$ \\
+tipo\_ocupacao\_aposentado & $-0{,}0744$ & 0,928 & $-$ \\
+tipo\_ocupacao\_CLT & $+0{,}0161$ & 1,016 & $\approx 0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Tabela de decis}
+
+A Tabela~\ref{tab:decis} confirma ordenação perfeitamente monotônica: a taxa de \emph{default} cai de 53{,}7\% no decil de maior risco para 5{,}3\% no de menor. O primeiro decil concentra 24{,}9\% dos \emph{defaults} e os três primeiros, 57{,}0\%; os cinco decis de menor risco respondem por apenas 25{,}5\%. A PD média e a taxa observada são próximas em todos os decis (a maior discrepância, no decil 4, é de 5 pontos percentuais em 300 observações, dentro do erro amostral), o que reforça a calibração observada na Figura~\ref{fig:roc}.
+
+\begin{table}[H]
+\centering\small
+\caption{Tabela de decis no \emph{holdout} (decil 1 $=$ maior risco).}
+\label{tab:decis}
+\begin{tabular}{crrrrr}
+\toprule
+Decil & $n$ & Defaults & PD média & Taxa observada & \% defaults acum. \\
+\midrule
+1 & 300 & 161 & 52,18\% & 53,67\% & 24,9\% \\
+2 & 300 & 108 & 36,78\% & 36,00\% & 41,6\% \\
+3 & 300 & 100 & 29,38\% & 33,33\% & 57,0\% \\
+4 & 300 & 58 & 24,46\% & 19,33\% & 66,0\% \\
+5 & 300 & 55 & 20,22\% & 18,33\% & 74,5\% \\
+6 & 300 & 49 & 16,89\% & 16,33\% & 82,1\% \\
+7 & 299 & 36 & 13,78\% & 12,04\% & 87,6\% \\
+8 & 301 & 34 & 11,10\% & 11,30\% & 92,9\% \\
+9 & 299 & 30 & 8,55\% & 10,03\% & 97,5\% \\
+10 & 301 & 16 & 5,08\% & 5,32\% & 100,0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Comparação com outros algoritmos}
+\label{sec:compare}
+
+A Tabela~\ref{tab:compare} reúne os treze modelos estimados por \code{compare\_models}. Regressão logística, \emph{ridge} e LDA empatam em AUC (0{,}7237), exatamente como prevê a discussão da Seção~\ref{sec:lr}: os três estimam uma fronteira linear no espaço das covariáveis, e o DGP é linear no \emph{logit}. Os métodos de \emph{ensemble} de árvores (\emph{gradient boosting} 0{,}709, AdaBoost 0{,}707, \emph{random forest} 0{,}685, \emph{extra trees} 0{,}667) ficam abaixo, porque gastam graus de liberdade aproximando por degraus uma relação que é suave, e a árvore única (0{,}531) sobreajusta. Esse resultado não generaliza a bases reais com não linearidades e interações --- \citet{lessmann2015} mostram que \emph{ensembles} costumam vencer nesses casos --- mas ilustra o ponto essencial: a vantagem de métodos flexíveis depende de haver estrutura não linear a capturar, e a logística é o \emph{benchmark} correto para medi-la.
+
+\begin{table}[H]
+\centering\small
+\caption{\code{compare\_models}: médias em 5 dobras, ordenadas por AUC.}
+\label{tab:compare}
+\begin{tabular}{lrrrrrr}
+\toprule
+Modelo & Acurácia & AUC & Recall & Precisão & F1 & Tempo (s) \\
+\midrule
+Regressão logística & 0,7956 & 0,7237 & 0,1509 & 0,6096 & 0,2414 & 0,060 \\
+Ridge & 0,7944 & 0,7237 & 0,0907 & 0,6791 & 0,1595 & 0,060 \\
+LDA & 0,7959 & 0,7237 & 0,1641 & 0,6016 & 0,2572 & 0,054 \\
+Gradient boosting & 0,7910 & 0,7090 & 0,1251 & 0,5742 & 0,2053 & 0,486 \\
+AdaBoost & 0,7893 & 0,7074 & 0,1727 & 0,5428 & 0,2606 & 0,222 \\
+Naive Bayes & 0,7799 & 0,6935 & 0,2468 & 0,4813 & 0,3257 & 0,064 \\
+Random forest & 0,7877 & 0,6846 & 0,1072 & 0,5383 & 0,1784 & 0,504 \\
+QDA & 0,7193 & 0,6750 & 0,3548 & 0,3788 & 0,3434 & 0,064 \\
+Extra trees & 0,7811 & 0,6674 & 0,1178 & 0,4681 & 0,1877 & 0,328 \\
+SVM linear & 0,7861 & 0,6644 & 0,0212 & 0,4756 & 0,0384 & 0,076 \\
+KNN & 0,7674 & 0,6316 & 0,1946 & 0,4172 & 0,2653 & 0,256 \\
+Árvore de decisão & 0,6701 & 0,5307 & 0,2853 & 0,2596 & 0,2717 & 0,084 \\
+Dummy & 0,7841 & 0,5000 & 0,0000 & 0,0000 & 0,0000 & 0,044 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Corte de aprovação}
+
+O corte que maximiza F1 no \emph{holdout} é 0{,}234 (F1 $=0{,}458$), bem abaixo do 0{,}5 padrão --- consequência direta do desbalanceamento e da baixa separabilidade intrínseca da base. O corte de custo mínimo com razão FN:FP de 10:1 é 0{,}09, o que aprovaria apenas 16{,}4\% da carteira. A diferença entre os dois ilustra que o limiar é uma decisão de política de crédito, não de estatística: com custo de perda dez vezes maior que a margem, a política ótima é muito conservadora, e cabe à área de negócio revisar a razão de custos (por exemplo, incluindo o valor do relacionamento e a receita de \emph{cross-sell}) até que a taxa de aprovação seja compatível com a estratégia. A Figura~\ref{fig:thr} mostra precisão, \emph{recall}, F1 e fila em função do limiar.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.62\textwidth]{cell27_1.png}
+\caption{Métricas em função do limiar de classificação (\code{plot\_model(plot='threshold')}).}
+\label{fig:thr}
+\end{figure}
+
+\subsection{Interpretação por SHAP}
+
+Para um modelo linear os valores SHAP \citep{lundberg2017} reduzem-se a $\phi_{ij}=\beta_j(x_{ij}-\bar{x}_j)$, isto é, à contribuição de cada variável em relação ao cliente médio; o \emph{summary plot} da Figura~\ref{fig:shap} portanto reproduz a ordem de importância da Tabela~\ref{tab:coefs}, mas acrescenta a dispersão da contribuição na população --- variáveis discretas como atrasos aparecem em nuvens separadas, e a cor indica a direção do efeito. O gráfico de força para um cliente individual decompõe seu \emph{log-odds} em contribuições aditivas, o que atende diretamente ao requisito de explicabilidade de decisões automatizadas.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.6\textwidth]{cell30_1.png}
+\caption{SHAP \emph{summary plot} no \emph{holdout} (\code{LinearExplainer}).}
+\label{fig:shap}
+\end{figure}
+
+\subsection{Base real: cartões de crédito de Taiwan}
+
+Aplicado à base de \citet{yeh2009} (24\,000 clientes, 23 covariáveis, taxa de \emph{default} de 22{,}11\%), o mesmo pipeline produziu, no \emph{holdout}, $\auc=0{,}7195$, $\mathrm{Gini}=0{,}4390$ e $\ks=0{,}3701$, com AUC médio de 0{,}721 na validação cruzada. Os valores são próximos aos da base simulada e aos reportados na literatura para regressão logística nessa base, o que confirma que a ordem de grandeza da simulação é realista e que o pipeline se transporta sem ajustes a dados reais.
+
+\subsection{Escala 100--900}
+
+Com a calibração de faixa cheia, obteve-se $\mathrm{Factor}=180{,}34$ e $\mathrm{Offset}=240{,}8$, o que implica PDO de 125 pontos. O escore no \emph{holdout} tem média 505{,}7, desvio-padrão 156{,}8 e quartis 399, 508 e 616. A Tabela~\ref{tab:faixas} e a Figura~\ref{fig:score} mostram a distribuição e a taxa de \emph{default} por faixa de 100 pontos: a taxa cai monotonicamente de 62{,}9\% na faixa 100--200 para 3{,}5\% na faixa 800--900, e 64\% da carteira concentra-se entre 400 e 700 pontos.
+
+\begin{table}[H]
+\centering\small
+\caption{Distribuição do escore e taxa de \emph{default} por faixa (\emph{holdout}).}
+\label{tab:faixas}
+\begin{tabular}{lrrrr}
+\toprule
+Faixa & $n$ & Defaults & Taxa de default & \% carteira \\
+\midrule
+100--200 & 89 & 56 & 62,92\% & 3,0\% \\
+200--300 & 214 & 106 & 49,53\% & 7,1\% \\
+300--400 & 455 & 162 & 35,60\% & 15,2\% \\
+400--500 & 673 & 144 & 21,40\% & 22,4\% \\
+500--600 & 702 & 106 & 15,10\% & 23,4\% \\
+600--700 & 553 & 55 & 9,95\% & 18,4\% \\
+700--800 & 228 & 15 & 6,58\% & 7,6\% \\
+800--900 & 86 & 3 & 3,49\% & 2,9\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{cell32_1.png}
+\caption{Histograma do escore 100--900 e taxa de \emph{default} por faixa.}
+\label{fig:score}
+\end{figure}
+
+\subsection{Scorecard por WoE}
+\label{sec:res-scorecard}
+
+A Tabela~\ref{tab:iv} ordena as variáveis por IV. Atrasos (0{,}126), utilização (0{,}111) e DTI (0{,}107) são as únicas de poder ``médio'' pela escala de \citet{siddiqi2017}; as demais são ``fracas'' mas todas superam o piso de 0{,}02. A ordem coincide com a dos coeficientes padronizados, como se espera quando as covariáveis são pouco correlacionadas.
+
+\begin{table}[H]
+\centering\small
+\caption{\emph{Information Value} por variável (treino do \emph{scorecard}).}
+\label{tab:iv}
+\begin{tabular}{lr}
+\toprule
+Variável & IV \\
+\midrule
+n\_atrasos\_12m & 0,126 \\
+utilizacao & 0,111 \\
+dti & 0,107 \\
+idade & 0,065 \\
+tipo\_ocupacao & 0,059 \\
+consultas\_6m & 0,053 \\
+tempo\_emprego & 0,045 \\
+possui\_imovel & 0,040 \\
+renda & 0,030 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A Tabela~\ref{tab:scorecard0} apresenta o \emph{scorecard} inicial, com 37 faixas. Duas violações de monotonicidade são visíveis: em tempo de emprego, as três primeiras faixas têm taxas de 24{,}2\%, 24{,}0\% e 24{,}3\% (pontos 22, 25 e 21), e em renda as faixas 3 e 4 são indistinguíveis (63 e 64 pontos). Ambas são ruído amostral em torno de uma relação verdadeiramente monotônica --- o DGP é linear nessas variáveis --- e são exatamente o tipo de artefato que o \emph{coarse classing} deve eliminar. Pontos negativos em faixas de alto risco decorrem da combinação entre a calibração de faixa cheia e a distribuição igualitária do intercepto; eles não afetam a ordenação.
+
+No \emph{holdout}, o \emph{scorecard} obteve $\auc=0{,}7208$, $\mathrm{Gini}=0{,}4415$ e $\ks=0{,}3340$, contra 0{,}7246, 0{,}4492 e 0{,}3472 da regressão sobre variáveis contínuas. A perda de 0{,}8 ponto de Gini é o custo da categorização em quintis --- pequeno, e recuperável parcialmente com cortes manuais orientados por negócio. O exemplo de cliente ao final da Tabela~\ref{tab:scorecard0} (servidor de 53 anos, com 8{,}9 anos de emprego, mas dois atrasos e DTI de 81\%) mostra a leitura que o \emph{scorecard} permite: 427 pontos, em que os $-124$ dos atrasos e os $-40$ do DTI anulam os $+144$ da ocupação e os $+138$ do tempo de emprego.
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{\emph{Scorecard} inicial (37 faixas): taxa de \emph{default}, WoE e pontos por faixa.}
+\label{tab:scorecard0}
+\begin{tabular}{llrrrr}
+\toprule
+Variável & Faixa & $n$ & Taxa default & WoE & Pontos \\
+\midrule
+idade & $(-\infty, 30]$ & 1417 & 28,51\% & $-0{,}371$ & $-24$ \\
+idade & $(30, 40]$ & 1424 & 23,31\% & $-0{,}100$ & 32 \\
+idade & $(40, 49]$ & 1376 & 21,73\% & $-0{,}010$ & 51 \\
+idade & $(49, 60]$ & 1521 & 17,95\% & 0,228 & 100 \\
+idade & $(60, \infty)$ & 1262 & 16,09\% & 0,360 & 127 \\
+\addlinespace
+renda & $(-\infty, 2391]$ & 1400 & 25,50\% & $-0{,}219$ & 9 \\
+renda & $(2391, 3206]$ & 1400 & 23,93\% & $-0{,}134$ & 26 \\
+renda & $(3206, 4094]$ & 1401 & 20,70\% & 0,052 & 63 \\
+renda & $(4094, 5547]$ & 1400 & 20,64\% & 0,055 & 64 \\
+renda & $(5547, \infty)$ & 1399 & 17,16\% & 0,283 & 110 \\
+\addlinespace
+tempo\_emprego & $(-\infty, 1{,}1]$ & 1474 & 24,22\% & $-0{,}150$ & 22 \\
+tempo\_emprego & $(1{,}1, 2{,}5]$ & 1373 & 23,96\% & $-0{,}136$ & 25 \\
+tempo\_emprego & $(2{,}5, 4{,}6]$ & 1377 & 24,26\% & $-0{,}152$ & 21 \\
+tempo\_emprego & $(4{,}6, 8{,}1]$ & 1393 & 19,96\% & 0,098 & 73 \\
+tempo\_emprego & $(8{,}1, \infty)$ & 1383 & 15,40\% & 0,412 & 138 \\
+\addlinespace
+utilizacao & $(-\infty, 0{,}204]$ & 1408 & 13,85\% & 0,536 & 161 \\
+utilizacao & $(0{,}204, 0{,}325]$ & 1396 & 17,98\% & 0,226 & 98 \\
+utilizacao & $(0{,}325, 0{,}438]$ & 1411 & 20,98\% & 0,035 & 60 \\
+utilizacao & $(0{,}438, 0{,}58]$ & 1388 & 25,43\% & $-0{,}215$ & 10 \\
+utilizacao & $(0{,}58, \infty)$ & 1397 & 29,78\% & $-0{,}433$ & $-34$ \\
+\addlinespace
+dti & $(-\infty, 0{,}139]$ & 1404 & 15,03\% & 0,440 & 144 \\
+dti & $(0{,}139, 0{,}224]$ & 1407 & 16,35\% & 0,341 & 123 \\
+dti & $(0{,}224, 0{,}312]$ & 1389 & 21,74\% & $-0{,}010$ & 51 \\
+dti & $(0{,}312, 0{,}426]$ & 1402 & 24,75\% & $-0{,}179$ & 16 \\
+dti & $(0{,}426, \infty)$ & 1398 & 30,11\% & $-0{,}449$ & $-40$ \\
+\addlinespace
+n\_atrasos\_12m & 0 & 4713 & 17,65\% & 0,250 & 103 \\
+n\_atrasos\_12m & 1 & 1848 & 27,27\% & $-0{,}310$ & $-9$ \\
+n\_atrasos\_12m & 2+ & 439 & 39,86\% & $-0{,}880$ & $-124$ \\
+\addlinespace
+consultas\_6m & 0 & 2151 & 17,02\% & 0,293 & 109 \\
+consultas\_6m & 1--2 & 4041 & 22,25\% & $-0{,}039$ & 45 \\
+consultas\_6m & 3+ & 808 & 30,45\% & $-0{,}465$ & $-37$ \\
+\addlinespace
+possui\_imovel & não & 3440 & 25,03\% & $-0{,}193$ & 14 \\
+possui\_imovel & sim & 3560 & 18,26\% & 0,208 & 95 \\
+\addlinespace
+tipo\_ocupacao & CLT & 3453 & 21,49\% & 0,005 & 54 \\
+tipo\_ocupacao & aposentado & 711 & 18,00\% & 0,223 & 99 \\
+tipo\_ocupacao & autonomo & 1730 & 27,46\% & $-0{,}319$ & $-13$ \\
+tipo\_ocupacao & servidor & 1106 & 15,01\% & 0,441 & 144 \\
+\midrule
+\multicolumn{6}{l}{\emph{Exemplo:} idade 53 (100) + renda 2663 (26) + tempo 8,9 (138) + utiliz. 0,43 (60) + atrasos 2 ($-124$)}\\
+\multicolumn{6}{l}{\phantom{\emph{Exemplo:}} + DTI 0,81 ($-40$) + consultas 0 (109) + servidor (144) + sem imóvel (14) $=$ \textbf{427 pontos}}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Validação temporal com safra como controle}
+\label{sec:res-safra}
+
+Com o OOT como \emph{holdout} nativo, a regressão logística reestimada no treino de desenvolvimento (AUC médio de 0{,}724 na validação cruzada) obteve $\auc=0{,}7384$ no OOS e $0{,}7155$ no OOT (Tabela~\ref{tab:oos-oot}). A diferença de 2{,}3 pontos de AUC entre OOS e OOT não é deterioração temporal --- a base é estacionária --- mas dispersão amostral: o OOS tem 1\,497 observações e o OOT 2\,517, e o intervalo de confiança do AUC nesses tamanhos tem meia-largura da ordem de 0{,}02 a 0{,}03. É uma lição importante para a validação: uma queda dessa magnitude entre OOS e OOT só deve ser interpretada como degradação se for estatisticamente distinguível do erro amostral, por exemplo via o teste de DeLong ou \emph{bootstrap}.
+
+\begin{table}[H]
+\centering\small
+\caption{Discriminação nas amostras \emph{out-of-sample} e \emph{out-of-time}.}
+\label{tab:oos-oot}
+\begin{tabular}{lrrrr}
+\toprule
+Amostra & $n$ & AUC & Gini & KS \\
+\midrule
+OOS (in-time, 2023-01 a 2024-06) & 1\,497 & 0,7384 & 0,4768 & 0,3858 \\
+OOT (2024-07 a 2024-12) & 2\,517 & 0,7155 & 0,4310 & 0,3264 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A Tabela~\ref{tab:safra} apresenta as métricas por safra e a Figura~\ref{fig:safra} as representa graficamente. Nas dezoito safras do OOS, cada uma com 69 a 100 observações, o AUC oscila entre 0{,}557 e 0{,}830 e o PSI entre 0{,}026 e 0{,}346 --- amplitudes que, à luz de \citet{yurdakul2018}, são inteiramente explicadas pelo tamanho amostral, já que a população é a mesma. Nas seis safras do OOT, com 400 a 447 observações cada, o AUC fica entre 0{,}657 e 0{,}747 e o PSI entre 0{,}017 e 0{,}053, todos abaixo do limiar de atenção. A PD média (44--48\%) supera sistematicamente a taxa observada (20--24\%): isso é esperado, porque o modelo de desenvolvimento foi calibrado nas 7\,000 observações de treino e as PDs reportadas aqui são as do \emph{holdout} nativo do PyCaret; a calibração de nível deve ser refeita sobre a tendência central da carteira alvo, etapa que é distinta da ordenação.
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{Taxa de \emph{default}, discriminação e PSI do escore por safra.}
+\label{tab:safra}
+\begin{tabular}{llrrrrrrr}
+\toprule
+Safra & Amostra & $n$ & Taxa default & PD média & AUC & Gini & KS & PSI \\
+\midrule
+2023-01 & OOS & 73 & 24,66\% & 48,60\% & 0,692 & 0,385 & 0,341 & 0,046 \\
+2023-02 & OOS & 77 & 14,29\% & 42,36\% & 0,791 & 0,581 & 0,500 & 0,255 \\
+2023-03 & OOS & 78 & 26,92\% & 44,68\% & 0,772 & 0,544 & 0,521 & 0,026 \\
+2023-04 & OOS & 86 & 23,26\% & 50,34\% & 0,747 & 0,494 & 0,523 & 0,154 \\
+2023-05 & OOS & 94 & 18,09\% & 48,04\% & 0,734 & 0,468 & 0,367 & 0,094 \\
+2023-06 & OOS & 89 & 17,98\% & 44,53\% & 0,603 & 0,206 & 0,235 & 0,037 \\
+2023-07 & OOS & 100 & 23,00\% & 43,84\% & 0,788 & 0,577 & 0,457 & 0,059 \\
+2023-08 & OOS & 92 & 20,65\% & 46,95\% & 0,828 & 0,655 & 0,548 & 0,026 \\
+2023-09 & OOS & 69 & 20,29\% & 50,04\% & 0,678 & 0,356 & 0,369 & 0,134 \\
+2023-10 & OOS & 85 & 21,18\% & 46,84\% & 0,782 & 0,564 & 0,599 & 0,069 \\
+2023-11 & OOS & 81 & 23,46\% & 47,77\% & 0,755 & 0,509 & 0,515 & 0,124 \\
+2023-12 & OOS & 86 & 23,26\% & 48,05\% & 0,737 & 0,474 & 0,426 & 0,346 \\
+2024-01 & OOS & 81 & 22,22\% & 44,72\% & 0,646 & 0,293 & 0,286 & 0,114 \\
+2024-02 & OOS & 83 & 21,69\% & 48,49\% & 0,719 & 0,438 & 0,417 & 0,284 \\
+2024-03 & OOS & 74 & 29,73\% & 46,96\% & 0,797 & 0,594 & 0,523 & 0,074 \\
+2024-04 & OOS & 89 & 14,61\% & 43,07\% & 0,557 & 0,114 & 0,202 & 0,096 \\
+2024-05 & OOS & 84 & 19,05\% & 52,02\% & 0,790 & 0,579 & 0,562 & 0,157 \\
+2024-06 & OOS & 76 & 23,68\% & 47,51\% & 0,830 & 0,661 & 0,651 & 0,055 \\
+\midrule
+2024-07 & OOT & 415 & 22,17\% & 44,48\% & 0,657 & 0,313 & 0,281 & 0,029 \\
+2024-08 & OOT & 412 & 20,87\% & 44,58\% & 0,727 & 0,454 & 0,351 & 0,040 \\
+2024-09 & OOT & 432 & 19,91\% & 45,34\% & 0,747 & 0,493 & 0,397 & 0,031 \\
+2024-10 & OOT & 447 & 23,27\% & 47,55\% & 0,715 & 0,430 & 0,335 & 0,053 \\
+2024-11 & OOT & 400 & 23,50\% & 46,58\% & 0,707 & 0,414 & 0,347 & 0,027 \\
+2024-12 & OOT & 411 & 22,63\% & 46,95\% & 0,737 & 0,474 & 0,381 & 0,017 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\textwidth]{cell35_1.png}
+\caption{Taxa observada vs. PD média e discriminação por safra (área sombreada $=$ OOT).}
+\label{fig:safra}
+\end{figure}
+
+A estabilidade das características (Tabela~\ref{tab:csi}) é inequívoca: o maior CSI é 0{,}0046 (tempo de emprego), duas ordens de grandeza abaixo do limiar de 0{,}10. A ordenação do WoE entre desenvolvimento e OOT tem correlação de Spearman igual a 1{,}0 em cinco variáveis, 0{,}9 em idade e DTI e 0{,}7 em tempo de emprego --- justamente a variável cujas três primeiras faixas não se distinguem. Quatro faixas apresentam inversão de sinal, mas em todas elas o WoE de desenvolvimento está entre $-0{,}01$ e $+0{,}04$, isto é, faixas de risco médio cujo sinal é indeterminado por construção. A reestimação trimestral (Tabela~\ref{tab:betas}) confirma que todos os 72 coeficientes (nove variáveis em oito trimestres de cerca de 1\,250 observações) são negativos, com valores entre $-0{,}50$ e $-1{,}86$ e mediana próxima de $-1{,}1$, muito perto do $-1$ teórico da Seção~\ref{sec:woe}, o que indica correlação baixa entre as covariáveis.
+
+\begin{table}[H]
+\centering\small
+\caption{Estabilidade por variável entre desenvolvimento e OOT.}
+\label{tab:csi}
+\begin{tabular}{lrrr}
+\toprule
+Variável & $\rho$ Spearman (WoE) & Faixas com inversão & CSI \\
+\midrule
+tempo\_emprego & 0,7 & 0 & 0,0046 \\
+idade & 0,9 & 0 & 0,0041 \\
+dti & 0,9 & 1 & 0,0020 \\
+tipo\_ocupacao & 1,0 & 1 & 0,0019 \\
+renda & 1,0 & 1 & 0,0013 \\
+utilizacao & 1,0 & 1 & 0,0012 \\
+n\_atrasos\_12m & 1,0 & 0 & 0,0012 \\
+consultas\_6m & 1,0 & 0 & 0,0005 \\
+possui\_imovel & --- & 0 & 0,0001 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{Coeficientes da regressão sobre WoE reestimados por trimestre (esperado: $<0$).}
+\label{tab:betas}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+Janela & idade & renda & tempo & utiliz. & dti & atrasos & consultas & imóvel & ocupação \\
+\midrule
+2023T1 & $-1{,}10$ & $-1{,}52$ & $-1{,}59$ & $-1{,}29$ & $-1{,}13$ & $-1{,}15$ & $-0{,}51$ & $-0{,}68$ & $-1{,}71$ \\
+2023T2 & $-1{,}02$ & $-1{,}17$ & $-0{,}69$ & $-0{,}57$ & $-0{,}84$ & $-1{,}08$ & $-1{,}29$ & $-0{,}95$ & $-0{,}98$ \\
+2023T3 & $-0{,}81$ & $-1{,}51$ & $-0{,}61$ & $-1{,}21$ & $-1{,}32$ & $-1{,}20$ & $-1{,}86$ & $-1{,}08$ & $-0{,}98$ \\
+2023T4 & $-1{,}62$ & $-0{,}89$ & $-1{,}43$ & $-1{,}43$ & $-1{,}35$ & $-1{,}29$ & $-1{,}42$ & $-1{,}28$ & $-1{,}21$ \\
+2024T1 & $-1{,}01$ & $-0{,}50$ & $-1{,}38$ & $-1{,}63$ & $-1{,}34$ & $-1{,}10$ & $-0{,}59$ & $-1{,}46$ & $-0{,}87$ \\
+2024T2 & $-1{,}07$ & $-1{,}10$ & $-1{,}05$ & $-0{,}99$ & $-1{,}03$ & $-1{,}15$ & $-1{,}33$ & $-1{,}25$ & $-1{,}18$ \\
+2024T3 & $-0{,}90$ & $-0{,}52$ & $-1{,}04$ & $-0{,}82$ & $-1{,}35$ & $-0{,}99$ & $-1{,}31$ & $-1{,}00$ & $-1{,}01$ \\
+2024T4 & $-1{,}06$ & $-1{,}66$ & $-1{,}50$ & $-1{,}27$ & $-1{,}31$ & $-0{,}87$ & $-0{,}89$ & $-1{,}49$ & $-0{,}82$ \\
+\midrule
+Desenv. & $-1{,}07$ & $-1{,}10$ & $-1{,}08$ & $-1{,}16$ & $-1{,}16$ & $-1{,}14$ & $-1{,}20$ & $-1{,}12$ & $-1{,}13$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Refino recursivo}
+\label{sec:res-refino}
+
+O Algoritmo~\ref{alg:refino} convergiu em três iterações com seis ações, todas de mesclagem, e manteve as nove variáveis (Tabela~\ref{tab:log}). Na primeira iteração, renda e tempo de emprego tiveram pares não monotônicos fundidos, e DTI e tipo de ocupação tiveram faixas com inversão de sinal no OOT (respectivamente a faixa central de DTI e a categoria CLT, ambas com WoE próximo de zero) mescladas às vizinhas de WoE mais próximo. Na segunda, tempo de emprego exigiu nova fusão --- as três primeiras faixas originais viraram uma só, $(-\infty, 4{,}6]$ --- e DTI teve as duas faixas de menor risco unidas para elevar a correlação de ordenação, que havia caído exatamente ao limiar de 0{,}80 após a primeira mesclagem. Na terceira iteração nenhuma restrição de faixa foi violada, todos os coeficientes foram negativos no desenvolvimento e nos quatro semestres (Tabela~\ref{tab:betas-fin}), e o algoritmo parou.
+
+\begin{table}[H]
+\centering\small
+\caption{\emph{Log} de ações do refino recursivo.}
+\label{tab:log}
+\begin{tabular}{clll}
+\toprule
+Iter. & Variável & Ação & Motivo \\
+\midrule
+1 & renda & mescla $(3216, 4095]$ + $(4095, 5539]$ & WoE não monotônico \\
+1 & tempo\_emprego & mescla $(-\infty, 1{,}1]$ + $(1{,}1, 2{,}5]$ & WoE não monotônico \\
+1 & dti & mescla $(0{,}222, 0{,}309]$ + $(0{,}309, 0{,}423]$ & inversão de sinal no OOT \\
+1 & tipo\_ocupacao & mescla CLT + aposentado & inversão de sinal no OOT \\
+2 & tempo\_emprego & mescla $(-\infty, 2{,}5]$ + $(2{,}5, 4{,}6]$ & WoE não monotônico \\
+2 & dti & mescla $(-\infty, 0{,}139]$ + $(0{,}139, 0{,}222]$ & $\rho=0{,}80<0{,}80$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+O \emph{scorecard} final (Tabela~\ref{tab:scorecard1}) tem 31 faixas. Todas as variáveis numéricas são agora estritamente monotônicas; tempo de emprego passou a três faixas (até 4{,}6 anos, 4{,}6 a 8{,}2 e acima de 8{,}2) com pontos 24, 73 e 133; DTI passou a três faixas com 131, 38 e $-45$; e CLT e aposentado formam uma categoria única de 61 pontos, entre autônomo ($-12$) e servidor (143).
+
+\begin{table}[H]
+\centering\footnotesize
+\caption{\emph{Scorecard} final após o refino (31 faixas), estimado no desenvolvimento.}
+\label{tab:scorecard1}
+\begin{tabular}{llrrrr}
+\toprule
+Variável & Faixa & $n$ & Taxa default & WoE & Pontos \\
+\midrule
+idade & $(-\infty, 30]$ & 1524 & 27,82\% & $-0{,}347$ & $-17$ \\
+idade & $(30, 40]$ & 1548 & 23,06\% & $-0{,}096$ & 34 \\
+idade & $(40, 49]$ & 1442 & 21,64\% & $-0{,}014$ & 50 \\
+idade & $(49, 59]$ & 1499 & 18,35\% & 0,192 & 91 \\
+idade & $(59, \infty)$ & 1470 & 15,99\% & 0,358 & 125 \\
+\addlinespace
+renda & $(-\infty, 2411]$ & 1500 & 25,40\% & $-0{,}223$ & 6 \\
+renda & $(2411, 3216]$ & 1493 & 22,97\% & $-0{,}091$ & 34 \\
+renda & $(3216, 5539]$ & 2993 & 20,75\% & 0,040 & 61 \\
+renda & $(5539, \infty)$ & 1497 & 17,23\% & 0,268 & 110 \\
+\addlinespace
+tempo\_emprego & $(-\infty, 4{,}6]$ & 4522 & 23,86\% & $-0{,}140$ & 24 \\
+tempo\_emprego & $(4{,}6, 8{,}16]$ & 1464 & 19,81\% & 0,097 & 73 \\
+tempo\_emprego & $(8{,}16, \infty)$ & 1497 & 15,63\% & 0,385 & 133 \\
+\addlinespace
+utilizacao & $(-\infty, 0{,}207]$ & 1500 & 13,53\% & 0,553 & 164 \\
+utilizacao & $(0{,}207, 0{,}327]$ & 1506 & 17,00\% & 0,284 & 110 \\
+utilizacao & $(0{,}327, 0{,}442]$ & 1494 & 21,82\% & $-0{,}025$ & 48 \\
+utilizacao & $(0{,}442, 0{,}581]$ & 1487 & 24,28\% & $-0{,}163$ & 20 \\
+utilizacao & $(0{,}581, \infty)$ & 1496 & 30,55\% & $-0{,}479$ & $-43$ \\
+\addlinespace
+dti & $(-\infty, 0{,}222]$ & 3010 & 15,85\% & 0,369 & 131 \\
+dti & $(0{,}222, 0{,}423]$ & 2979 & 22,63\% & $-0{,}071$ & 38 \\
+dti & $(0{,}423, \infty)$ & 1494 & 30,25\% & $-0{,}465$ & $-45$ \\
+\addlinespace
+n\_atrasos\_12m & 0 & 5020 & 17,53\% & 0,248 & 104 \\
+n\_atrasos\_12m & 1 & 1985 & 26,65\% & $-0{,}288$ & $-6$ \\
+n\_atrasos\_12m & 2+ & 478 & 40,59\% & $-0{,}919$ & $-136$ \\
+\addlinespace
+consultas\_6m & 0 & 2296 & 16,86\% & 0,295 & 113 \\
+consultas\_6m & 1--2 & 4326 & 21,82\% & $-0{,}024$ & 48 \\
+consultas\_6m & 3+ & 861 & 31,59\% & $-0{,}528$ & $-55$ \\
+\addlinespace
+possui\_imovel & não & 3713 & 24,64\% & $-0{,}182$ & 14 \\
+possui\_imovel & sim & 3770 & 18,25\% & 0,199 & 95 \\
+\addlinespace
+tipo\_ocupacao & CLT + aposentado & 4473 & 20,81\% & 0,036 & 61 \\
+tipo\_ocupacao & autonomo & 1848 & 26,68\% & $-0{,}289$ & $-12$ \\
+tipo\_ocupacao & servidor & 1162 & 15,40\% & 0,401 & 143 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\caption{Coeficientes do modelo final sobre WoE, no desenvolvimento e por semestre.}
+\label{tab:betas-fin}
+\begin{tabular}{lrrrrr}
+\toprule
+Variável & Desenv. & 2023S1 & 2023S2 & 2024S1 & 2024S2 \\
+\midrule
+idade & $-1{,}111$ & $-1{,}102$ & $-1{,}230$ & $-1{,}029$ & $-1{,}011$ \\
+renda & $-1{,}176$ & $-1{,}501$ & $-1{,}218$ & $-0{,}810$ & $-1{,}167$ \\
+tempo\_emprego & $-1{,}149$ & $-1{,}146$ & $-1{,}027$ & $-1{,}292$ & $-1{,}334$ \\
+utilizacao & $-1{,}117$ & $-0{,}886$ & $-1{,}222$ & $-1{,}253$ & $-0{,}976$ \\
+dti & $-1{,}174$ & $-0{,}964$ & $-1{,}290$ & $-1{,}265$ & $-1{,}340$ \\
+n\_atrasos\_12m & $-1{,}137$ & $-1{,}080$ & $-1{,}249$ & $-1{,}113$ & $-0{,}928$ \\
+consultas\_6m & $-1{,}134$ & $-0{,}883$ & $-1{,}543$ & $-0{,}978$ & $-1{,}003$ \\
+possui\_imovel & $-1{,}181$ & $-0{,}863$ & $-1{,}210$ & $-1{,}453$ & $-1{,}305$ \\
+tipo\_ocupacao & $-1{,}239$ & $-1{,}419$ & $-1{,}167$ & $-1{,}142$ & $-1{,}009$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A Tabela~\ref{tab:final} compara a discriminação do \emph{scorecard} refinado com a da regressão logística contínua nas mesmas amostras. O \emph{scorecard} obteve $\auc=0{,}7404$ no OOS e $0{,}7136$ no OOT, contra 0{,}7384 e 0{,}7155 da regressão contínua: as diferenças estão na terceira casa decimal e mudam de sinal entre as amostras, ou seja, são ruído. O resultado central é que um modelo com 31 faixas, monotônico por construção, estável entre desenvolvimento e OOT e com sinais coerentes em toda janela temporal não perde poder discriminante em relação ao modelo contínuo --- e é muito mais simples de explicar, implantar em motores de decisão e monitorar.
+
+\begin{table}[H]
+\centering\small
+\caption{Discriminação do \emph{scorecard} refinado e da regressão contínua.}
+\label{tab:final}
+\begin{tabular}{llrrr}
+\toprule
+Modelo & Amostra & AUC & Gini & KS \\
+\midrule
+\multirow{3}{*}{Scorecard refinado (31 faixas)} & Desenvolvimento & 0,7255 & 0,4510 & 0,3325 \\
+ & OOS & 0,7404 & 0,4808 & 0,3883 \\
+ & OOT & 0,7136 & 0,4273 & 0,3209 \\
+\midrule
+\multirow{2}{*}{Regressão logística contínua} & OOS & 0,7384 & 0,4768 & 0,3858 \\
+ & OOT & 0,7155 & 0,4310 & 0,3264 \\
+\midrule
+Scorecard inicial (37 faixas) & Holdout 30\% & 0,7208 & 0,4415 & 0,3340 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =====================================================================
+\section{Discussão}
+\label{sec:discussao}
+
+\paragraph{O que a simulação ensina e o que não ensina.} Por ter DGP conhecido e estacionário, a base permite verificar que cada técnica faz o que promete: a regressão recupera todos os sinais; a tabela de decis é monotônica; a categorização perde pouco; e os testes de estabilidade, aplicados a uma população que não muda, reportam valores dentro do ruído --- o que fornece uma linha de base empírica para interpretar PSI, CSI e correlação de WoE em bases reais. O que a simulação não reproduz é a realidade de carteiras: não linearidades, interações, dados ausentes informativos, viés de seleção (\emph{reject inference}), mudança de perfil de originação e ciclos macroeconômicos. Em uma base real, espera-se que o Algoritmo~\ref{alg:refino} descarte variáveis e que \emph{ensembles} superem a logística em AUC; nesse caso, a decisão entre poder preditivo e interpretabilidade é de governança, e o \emph{scorecard} refinado é a resposta conservadora.
+
+\paragraph{Ruído amostral versus instabilidade.} Os resultados por safra mensal (Tabela~\ref{tab:safra}) mostram AUC de 0{,}56 a 0{,}83 e PSI de até 0{,}35 em uma população idêntica, apenas porque cada safra do OOS tem menos de cem observações. Isso tem duas implicações práticas. Primeiro, os limiares convencionais de PSI (0{,}10 e 0{,}25) pressupõem amostras grandes e devem ser corrigidos pelo tamanho \citep{yurdakul2018}, ou as safras devem ser agregadas em trimestres. Segundo, o critério de ``inversão de sinal do WoE'' do algoritmo é rigoroso demais para faixas cujo WoE de desenvolvimento é próximo de zero: nesse caso o sinal é indeterminado por construção e a inversão não é evidência de instabilidade. Uma extensão natural é exigir $|\woe^{\text{dev}}|$ acima de um piso (por exemplo 0{,}05) para que a inversão dispare a mesclagem, ou testar a diferença de WoE com seu erro-padrão.
+
+\paragraph{PDO e escala.} A calibração de faixa cheia produziu PDO de 125, contra os 20 a 40 típicos da indústria. Ambas as escolhas preservam ordenação; a diferença é de comunicação. Um PDO alto espalha a carteira por toda a régua e torna as faixas de 100 pontos economicamente distintas (Tabela~\ref{tab:faixas}), mas afasta o escore da convenção de mercado e exige recalibração se a distribuição de PD mudar. Instituições que comparam escores entre produtos ou com \emph{bureaus} devem preferir um PDO fixo e ancoragem explícita.
+
+\paragraph{Calibração de nível.} Todo o exercício mede ordenação. A PD usada em provisão (IFRS~9 / CMN 4.966) e em capital (IRB) precisa ser calibrada ao nível de \emph{default} da carteira alvo, com horizonte definido e, no caso do capital, com tendência central de longo prazo e margem de conservadorismo \citep{bcbs2005,bcb3648}. A transformação afim do \emph{log-odds} que define a escala é o lugar natural para essa calibração, e a curva de calibração e o teste de Hosmer--Lemeshow (ou, preferivelmente, testes binomiais por faixa) são as ferramentas de verificação.
+
+\paragraph{Governança e regulação.} O pipeline atende aos elementos que a supervisão exige de um modelo de PD: documentação do desenvolvimento, base e DGP reproduzíveis por semente, testes de discriminação, calibração e estabilidade, decomposição da decisão por variável e um plano de monitoramento (PSI, CSI e coeficientes por janela). A Resolução CMN 4.557 exige que a estrutura de gerenciamento de riscos avalie a adequação dos modelos ao longo do tempo \citep{cmn4557}; a SR 11-7 \citep{sr117} e o Documento de Trabalho 14 do Comitê de Basileia \citep{bcbs2005} detalham o que a validação independente deve testar. O algoritmo de refino contribui ao tornar auditáveis, por meio do \emph{log}, as razões de cada decisão de categorização --- algo que, na prática de mercado, costuma ficar registrado apenas na memória do modelador.
+
+\paragraph{Limitações do algoritmo.} O refino é guloso: aplica uma correção por variável por iteração e não retrocede, de modo que a ordem das regras afeta o resultado. Ele não considera interações entre variáveis nem otimiza globalmente a perda de IV ao mesclar. Alternativas de literatura incluem \emph{binning} ótimo por programação inteira ou por árvores com restrição de monotonicidade \citep{zeng2014}, que podem ser acopladas como primeira etapa antes das restrições de estabilidade.
+
+% =====================================================================
+\section{Conclusão}
+\label{sec:conclusao}
+
+O artigo percorreu, de ponta a ponta, a construção de um modelo de PD para crédito ao consumidor: da simulação com processo gerador conhecido à regressão logística estimada e ajustada com PyCaret, da avaliação por AUC, Gini, KS e tabela de decis à escolha de corte por custo, da interpretação por coeficientes e SHAP à escala de pontos e ao \emph{scorecard} por WoE, e da validação temporal organizada pela safra ao refino recursivo sob restrições de estabilidade. Os resultados quantitativos --- AUC de 0{,}725 no \emph{holdout}, ordenação monotônica em todos os decis, calibração sobre a diagonal, sinais coerentes com a teoria econômica em todas as variáveis e em todas as janelas temporais, e um \emph{scorecard} de 31 faixas que preserva a discriminação do modelo contínuo --- são os que se esperam de um modelo correto em uma população estacionária com heterogeneidade não observada.
+
+Três mensagens resumem a contribuição. Primeira, a regressão logística continua sendo o \emph{benchmark} adequado: em um DGP linear no \emph{logit} ela empata com LDA e \emph{ridge} e supera os \emph{ensembles}, e em bases reais ela é a régua contra a qual o ganho de métodos flexíveis deve ser medido. Segunda, a estabilidade temporal deve ser tratada como restrição de construção, não apenas como teste de aceitação; o uso da safra como variável de controle e o algoritmo recursivo operacionalizam essa ideia e deixam um rastro auditável. Terceira, a interpretação de indicadores de estabilidade exige atenção ao tamanho amostral: a mesma população produz PSI de 0{,}02 a 0{,}35 conforme a safra tenha 400 ou 70 observações. Como próximos passos, o pipeline pode ser estendido com calibração de nível ao horizonte regulatório, \emph{binning} ótimo com restrição de monotonicidade, tratamento de rejeitados e aplicação a uma carteira real com safras e ciclo macroeconômico efetivos.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

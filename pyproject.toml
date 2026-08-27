@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "credpipe"
+version = "0.1.0"
+description = "Pipeline end-to-end de modelo de PD: regressão logística (PyCaret), scorecard WoE, refino recursivo, malha de GH, calibração e relatório"
+requires-python = ">=3.9"
+dependencies = ["numpy", "pandas", "scipy", "scikit-learn>=1.3", "matplotlib", "pyyaml", "jinja2", "openpyxl", "markdown"]
+
+[project.optional-dependencies]
+pycaret = ["pycaret>=3.3,<3.4"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+credpipe = "credpipe.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["credpipe*"]
+
+[tool.ruff]
+line-length = 120
