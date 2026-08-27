@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "credpipe"
 version = "0.1.0"
 description = "Pipeline end-to-end de modelo de PD: regressão logística (PyCaret), scorecard WoE, refino recursivo, malha de GH, calibração e relatório"
-requires-python = ">=3.9"
+requires-python = ">=3.10,<3.13"
 dependencies = ["numpy", "pandas", "scipy", "scikit-learn>=1.3", "matplotlib", "pyyaml", "jinja2", "openpyxl", "markdown"]
 
 [project.optional-dependencies]
