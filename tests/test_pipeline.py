@@ -12,7 +12,7 @@ def test_run_completo(tmp_path):
     layout = tmp_path / "layout.yaml"; layout.write_text(yaml.safe_dump(lay, allow_unicode=True), encoding="utf-8")
     out = tmp_path / "run"
     res = run(str(base), str(layout), str(out), verbose=False)
-    for f in ("relatorio.html", "relatorio.md", "modelo_scorecard_final.xlsx", "de_para_score_GH_PD.csv", "scorecard_final.csv", "escorador.pkl", "resultados.json", "figs/painel_gh.png"):
+    for f in ("relatorio.html", "relatorio.md", "modelo_scorecard_final.xlsx", "de_para_score_GH_PD.csv", "scorecard_final.csv", "escoragem_novos_clientes.pkl", "resultados.json", "figs/painel_gh.png"):
         assert (out / f).exists(), f
     r = json.loads((out / "resultados.json").read_text(encoding="utf-8"))
     assert r["metricas_scorecard"]["oot"]["AUC"] > 0.6 and r["k_gh"] >= 3

@@ -20,7 +20,7 @@ def main(argv=None):
         gerar(a.n, a.seed, drift=a.drift).to_csv(a.out, index=False); print(f"gerado {a.out}")
     elif a.cmd == "score":
         from .ingest import ler
-        esc = pickle.load(open(Path(a.run) / "escorador.pkl", "rb"))
+        esc = pickle.load(open(Path(a.run) / "escoragem_novos_clientes.pkl", "rb"))
         esc(ler(a.data)).to_csv(a.out, index=False); print(f"escorado → {a.out}")
 
 

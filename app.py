@@ -106,7 +106,7 @@ if out and Path(out).exists():
     with tabs[5]:
         st.download_button("modelo_scorecard_final.xlsx", (Path(out) / "modelo_scorecard_final.xlsx").read_bytes(), "modelo_scorecard_final.xlsx")
         st.download_button("relatorio.html", (Path(out) / "relatorio.html").read_bytes(), "relatorio.html")
-        st.download_button("escorador.pkl", (Path(out) / "escorador.pkl").read_bytes(), "escorador.pkl")
+        st.download_button("escoragem_novos_clientes.pkl", (Path(out) / "escoragem_novos_clientes.pkl").read_bytes(), "escoragem_novos_clientes.pkl")
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for f in Path(out).rglob("*"):
@@ -114,11 +114,11 @@ if out and Path(out).exists():
                     z.write(f, f.relative_to(Path(out)))
         st.download_button("run completo (.zip)", buf.getvalue(), f"credpipe_run_{datetime.now():%Y%m%d_%H%M}.zip")
 
-    st.subheader("Escorar nova base com o modelo desta rodada")
+    st.subheader("Escoragem de novos clientes com o modelo desta rodada")
     novo = st.file_uploader("CSV com as mesmas explicativas", type=["csv"], key="novo")
     if novo is not None:
         import pickle
-        esc = pickle.load(open(Path(out) / "escorador.pkl", "rb"))
+        esc = pickle.load(open(Path(out) / "escoragem_novos_clientes.pkl", "rb"))
         dn = pd.read_csv(novo, sep=None, engine="python")
         sc = pd.concat([dn, esc(dn)], axis=1)
         st.dataframe(sc.head(50), use_container_width=True)

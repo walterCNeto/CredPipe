@@ -133,7 +133,7 @@ def _salvar(res, out: Path):
         if res["desafiantes"] is not None:
             res["desafiantes"]["resultados"].pipe(fmt.arredondar_df).to_excel(w, sheet_name="desafiantes", index=False)
         pd.DataFrame({"edges": res["edges"]}).to_excel(w, sheet_name="cortes_gh", index=False)
-    with open(out / "escorador.pkl", "wb") as f:
+    with open(out / "escoragem_novos_clientes.pkl", "wb") as f:
         pickle.dump(res["escorador"], f)
     if res["lr"]["backend"] == "sklearn":
         with open(out / "modelo_lr.pkl", "wb") as f:
