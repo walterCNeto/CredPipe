@@ -10,7 +10,7 @@ COLS_PCT = {"taxa", "taxa_default", "taxa_dev", "taxa_oos", "taxa_oot", "pd_medi
             "PD_12m_conservadora", "PD_IC95_inf", "PD_IC95_sup", "IC95_inf", "IC95_sup", "taxa_default_dev",
             "taxa_default_oot", "frac_janelas_invertidas", "pct_aprovacao"}
 COLS_INT = {"n", "defaults", "defaults_oot", "n_dev", "n_oos", "n_oot", "pontos", "score", "score_min", "score_max",
-            "decil", "GH", "gh", "iter", "n_gh", "n_faixas", "n_variaveis", "k_gh"}
+            "decil", "GH", "gh", "iter", "n_gh", "n_faixas", "n_variaveis", "k_gh", "safra", "safras"}
 
 
 def configurar(casas: int = 3, sep_decimal: str = ",") -> None:

@@ -1,4 +1,4 @@
-# {{ cfg.relatorio.titulo }}
+<h1>{{ cfg.relatorio.titulo }}</h1>
 
 <p class="meta">{{ cfg.relatorio.autor }} — {{ hoje }} — gerado por credpipe (backend LR: {{ r.backend_lr }})</p>
 
@@ -70,6 +70,7 @@ Tuning: C = {{ r.tuning.C|f3 }}, AUC CV = {{ r.tuning.auc_cv|f3 }}{% if r.tuning
 {% endfor %}
 
 ![ROC](figs/{{ figs.roc }})
+
 ![Calibração](figs/{{ figs.calibracao }})
 
 ### 4.4 Tabela de decis (OOT)
@@ -148,6 +149,7 @@ Status: {{ r.status_gh }}. {{ r.k_gh }} GHs; cortes de score: {% for c in r.cort
 {{ tab(res.mapa_gh, index=True) }}
 
 ![Painel GH](figs/{{ figs.painel_gh }})
+
 ![Calibração OOS vs OOT](figs/{{ figs.calib_oos_oot }})
 
 ### 7.3 De-para Score → GH → PD (provisão e precificação)
@@ -170,7 +172,7 @@ Top-{{ cfg.desafiantes.top_k }} nas amostras OOS e OOT:
 {% if figs.desafiantes %}![Desafiantes](figs/{{ figs.desafiantes }}){% endif %}
 
 {% for nome, imp in res.desafiantes.importancias.items() %}
-Importância ({{ nome }}): {% for v, x in imp.head(8).items() %}{{ v }} ({{ x|f3 }}){% if not loop.last %}, {% endif %}{% endfor %}.
+- **{{ nome }}** — importância: {% for v, x in imp.head(8).items() %}{{ v }} ({{ x|f3 }}){% if not loop.last %}, {% endif %}{% endfor %}.
 {% endfor %}
 
 Leitura: a diferença de AUC entre o melhor desafiante e o scorecard no OOT mede o ganho de não linearidades/interações que o scorecard não captura; se for da ordem do erro amostral (≈ ±0,02 nos tamanhos do OOT), o scorecard é preferível por interpretabilidade, estabilidade e implantação.

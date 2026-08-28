@@ -16,8 +16,14 @@ import yaml
 from credpipe import config, ingest, synth
 from credpipe.pipeline import run
 
-st.set_page_config(page_title="credpipe — modelo de PD", layout="wide")
+st.set_page_config(page_title="credpipe — modelo de PD", layout="wide", initial_sidebar_state="expanded")
 st.title("credpipe — modelo de PD: LR, scorecard, GH e calibração")
+
+st.caption("📱 No celular: se a tela estiver vazia, toque na seta ‹›  no canto superior esquerdo para abrir o painel com upload, layout e o botão Rodar.")
+if "base_df" not in st.session_state:
+    if st.button("▶ Rodar demonstração com base simulada", type="primary"):
+        st.session_state["base_df"] = synth.gerar()
+        st.rerun()
 
 EXEMPLO_LAYOUT = Path(__file__).parent / "examples" / "layout.yaml"
 
