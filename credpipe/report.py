@@ -91,6 +91,17 @@ def _md_to_html(md: str, titulo: str) -> str:
             f"<title>{titulo}</title><style>{CSS}</style>{mathjax}</head><body>{body}</body></html>")
 
 
+def _embutir_figs(html: str, out: Path) -> str:
+    import base64
+    def sub(m):
+        p = out / m.group(1)
+        if p.exists():
+            b64 = base64.b64encode(p.read_bytes()).decode()
+            return f'src="data:image/png;base64,{b64}"'
+        return m.group(0)
+    return re.sub(r'src="(figs/[^"]+\.png)"', sub, html)
+
+
 def gerar(res: dict, out: Path) -> dict:
     cfg = res["cfg"]; r = res["resumo"]
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), trim_blocks=True, lstrip_blocks=True)
@@ -102,7 +113,10 @@ def gerar(res: dict, out: Path) -> dict:
     md = tpl.render(cfg=cfg, r=r, res=res, hoje=date.today().isoformat(), desc_vars=desc_vars, sinais=sinais,
                     refs=referencias(TEMPLATES / "refs.bib"), figs=res["figs"], np=np)
     (out / "relatorio.md").write_text(md, encoding="utf-8")
+
     html = _md_to_html(md, cfg["relatorio"]["titulo"])
+    html = _embutir_figs(html, out)
+
     (out / "relatorio.html").write_text(html, encoding="utf-8")
     pdf = None
     if cfg["relatorio"].get("pdf") in ("auto", True) and shutil.which("pandoc"):
